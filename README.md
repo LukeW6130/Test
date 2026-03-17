@@ -25,5 +25,8 @@ Then open: <http://localhost:8000>
 
 - **W / S**: pitch up/down (elevator)
 - **A / D**: roll left/right (ailerons)
+<<<<<<< codex/create-3d-plane-flying-browser-game-8t3qn4
 - **Shift**: afterburner burst for fighter-jet-style acceleration
+=======
+>>>>>>> main
 - Turns are coordinated by your bank angle for a more realistic feel
