@@ -201,7 +201,7 @@
       flight.pitchVel += pitchInput * flight.pitchRate * controlAuthority * dt;
       flight.rollVel += rollInput * flight.rollRate * controlAuthority * dt;
 
-      const bank = plane.rotation.z;
+      const bank = plane.rotation.x;
       const speedFactor = THREE.MathUtils.clamp(flight.speed / flight.cruiseSpeed, 0.35, 1.35);
       flight.yawVel += -Math.sin(bank) * flight.yawFromBank * speedFactor * dt;
 
@@ -210,12 +210,13 @@
       flight.rollVel *= damping;
       flight.yawVel *= Math.exp(-(flight.angularDamping + 0.6) * dt);
 
-      plane.rotateX(flight.pitchVel * dt);
-      plane.rotateZ(flight.rollVel * dt);
+      // Plane forward axis is X, so pitch rotates around Z and roll rotates around X.
+      plane.rotateZ(flight.pitchVel * dt);
+      plane.rotateX(flight.rollVel * dt);
       plane.rotateY(flight.yawVel * dt);
 
-      plane.rotation.x = THREE.MathUtils.clamp(plane.rotation.x, -0.85, 0.85);
-      plane.rotation.z = THREE.MathUtils.clamp(plane.rotation.z, -1.2, 1.2);
+      plane.rotation.z = THREE.MathUtils.clamp(plane.rotation.z, -0.85, 0.85);
+      plane.rotation.x = THREE.MathUtils.clamp(plane.rotation.x, -1.2, 1.2);
 
       const forward = new THREE.Vector3(1, 0, 0).applyQuaternion(plane.quaternion);
 
@@ -224,7 +225,7 @@
       flight.speed += (flight.thrust - drag - climbPenalty) * dt;
       flight.speed = THREE.MathUtils.clamp(flight.speed, flight.minSpeed, flight.maxSpeed);
 
-      const lift = flight.liftCoeff * flight.speed * flight.speed * Math.cos(plane.rotation.z);
+      const lift = flight.liftCoeff * flight.speed * flight.speed * Math.cos(plane.rotation.x);
       const stallSink = Math.max(0, (flight.stallSpeed - flight.speed) * 0.9);
       flight.verticalSpeed += (lift - flight.gravity - stallSink) * dt;
       flight.verticalSpeed *= Math.exp(-0.3 * dt);
@@ -237,7 +238,7 @@
       if (plane.position.y < 3.5) {
         plane.position.y = 3.5;
         flight.verticalSpeed = Math.max(0, flight.verticalSpeed * 0.25);
-        plane.rotation.x = THREE.MathUtils.lerp(plane.rotation.x, -0.03, 0.15);
+        plane.rotation.z = THREE.MathUtils.lerp(plane.rotation.z, -0.03, 0.15);
       }
 
       // Keep world feeling endless by wrapping objects.
