@@ -53,8 +53,8 @@
   <aside id="hud">
     <h1>Sky Glide 3D</h1>
     <p>
-      Arrow Keys / WASD to steer, Q/E to yaw, Shift to boost.<br />
-      Speed: <span id="speed">0</span> u/s | Altitude: <span id="altitude">0</span> m
+      WASD flight controls: W/S pitch, A/D roll. Turns are coordinated by bank angle.<br />
+      Airspeed: <span id="speed">0</span> u/s | Altitude: <span id="altitude">0</span> m
     </p>
   </aside>
 
@@ -149,18 +149,26 @@
     plane.position.set(0, 28, 0);
     scene.add(plane);
 
-    // Flight state.
+    // Flight state tuned for a more realistic "bank to turn" feel.
     const flight = {
-      velocity: new THREE.Vector3(0, 0, -35),
-      speed: 35,
-      minSpeed: 15,
-      maxSpeed: 95,
-      turnRate: 0.9,
-      pitchRate: 0.85,
-      rollRate: 1.15,
-      yawRate: 0.6,
-      drag: 0.08,
-      lift: 0.5
+      velocity: new THREE.Vector3(35, 0, 0),
+      verticalSpeed: 0,
+      speed: 42,
+      minSpeed: 18,
+      cruiseSpeed: 46,
+      maxSpeed: 92,
+      stallSpeed: 24,
+      pitchVel: 0,
+      rollVel: 0,
+      yawVel: 0,
+      pitchRate: 1.15,
+      rollRate: 1.75,
+      yawFromBank: 1.1,
+      angularDamping: 2.6,
+      liftCoeff: 0.011,
+      gravity: 9.8,
+      dragCoeff: 0.018,
+      thrust: 36
     };
 
     const keyState = new Set();
@@ -184,35 +192,52 @@
     const clock = new THREE.Clock();
 
     function updateFlight(dt) {
-      const pitchInput = (keyState.has('arrowup') || keyState.has('w') ? 1 : 0)
-        - (keyState.has('arrowdown') || keyState.has('s') ? 1 : 0);
-      const rollInput = (keyState.has('arrowleft') || keyState.has('a') ? 1 : 0)
-        - (keyState.has('arrowright') || keyState.has('d') ? 1 : 0);
-      const yawInput = (keyState.has('q') ? 1 : 0) - (keyState.has('e') ? 1 : 0);
+      // WASD only: W/S = elevator (pitch), A/D = aileron (roll).
+      const pitchInput = (keyState.has('w') ? 1 : 0) - (keyState.has('s') ? 1 : 0);
+      const rollInput = (keyState.has('a') ? 1 : 0) - (keyState.has('d') ? 1 : 0);
 
-      const boost = keyState.has('shift') ? 22 : 0;
-      const targetSpeed = flight.minSpeed + boost + Math.max(0, plane.position.y - 10) * 0.16;
-      flight.speed += (THREE.MathUtils.clamp(targetSpeed, flight.minSpeed, flight.maxSpeed) - flight.speed) * dt;
+      const controlAuthority = THREE.MathUtils.clamp((flight.speed - flight.stallSpeed) / 22, 0.22, 1);
 
-      plane.rotateZ(rollInput * flight.rollRate * dt);
-      plane.rotateX(pitchInput * flight.pitchRate * dt);
-      plane.rotateY(yawInput * flight.yawRate * dt);
+      flight.pitchVel += pitchInput * flight.pitchRate * controlAuthority * dt;
+      flight.rollVel += rollInput * flight.rollRate * controlAuthority * dt;
 
-      // Turn naturally based on roll angle.
-      plane.rotation.y -= plane.rotation.z * flight.turnRate * dt;
+      const bank = plane.rotation.z;
+      const speedFactor = THREE.MathUtils.clamp(flight.speed / flight.cruiseSpeed, 0.35, 1.35);
+      flight.yawVel += -Math.sin(bank) * flight.yawFromBank * speedFactor * dt;
+
+      const damping = Math.exp(-flight.angularDamping * dt);
+      flight.pitchVel *= damping;
+      flight.rollVel *= damping;
+      flight.yawVel *= Math.exp(-(flight.angularDamping + 0.6) * dt);
+
+      plane.rotateX(flight.pitchVel * dt);
+      plane.rotateZ(flight.rollVel * dt);
+      plane.rotateY(flight.yawVel * dt);
+
+      plane.rotation.x = THREE.MathUtils.clamp(plane.rotation.x, -0.85, 0.85);
+      plane.rotation.z = THREE.MathUtils.clamp(plane.rotation.z, -1.2, 1.2);
 
       const forward = new THREE.Vector3(1, 0, 0).applyQuaternion(plane.quaternion);
-      const liftForce = Math.max(0, flight.speed * flight.lift * Math.cos(plane.rotation.z));
 
-      flight.velocity.copy(forward.multiplyScalar(flight.speed));
-      flight.velocity.y += (liftForce - 9.8 - plane.position.y * flight.drag * 0.03) * dt;
+      const drag = flight.dragCoeff * flight.speed * flight.speed;
+      const climbPenalty = Math.max(0, forward.y) * 16;
+      flight.speed += (flight.thrust - drag - climbPenalty) * dt;
+      flight.speed = THREE.MathUtils.clamp(flight.speed, flight.minSpeed, flight.maxSpeed);
 
+      const lift = flight.liftCoeff * flight.speed * flight.speed * Math.cos(plane.rotation.z);
+      const stallSink = Math.max(0, (flight.stallSpeed - flight.speed) * 0.9);
+      flight.verticalSpeed += (lift - flight.gravity - stallSink) * dt;
+      flight.verticalSpeed *= Math.exp(-0.3 * dt);
+
+      flight.velocity.lerp(forward.multiplyScalar(flight.speed), 1 - Math.exp(-7 * dt));
+      flight.velocity.y += flight.verticalSpeed * dt;
       plane.position.addScaledVector(flight.velocity, dt);
 
-      // Soft floor so the player can't clip into terrain.
+      // Soft floor so the player cannot clip through terrain.
       if (plane.position.y < 3.5) {
         plane.position.y = 3.5;
-        plane.rotation.x = THREE.MathUtils.lerp(plane.rotation.x, -0.05, 0.18);
+        flight.verticalSpeed = Math.max(0, flight.verticalSpeed * 0.25);
+        plane.rotation.x = THREE.MathUtils.lerp(plane.rotation.x, -0.03, 0.15);
       }
 
       // Keep world feeling endless by wrapping objects.
