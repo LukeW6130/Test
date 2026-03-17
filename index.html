@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sky Glide 3D</title>
+  <style>
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: linear-gradient(#8bd3ff, #dff4ff);
+      font-family: Arial, Helvetica, sans-serif;
+      color: #0a2740;
+    }
+
+    #hud {
+      position: fixed;
+      top: 12px;
+      left: 12px;
+      z-index: 10;
+      background: rgba(255, 255, 255, 0.75);
+      border: 1px solid rgba(10, 39, 64, 0.2);
+      border-radius: 10px;
+      padding: 10px 12px;
+      backdrop-filter: blur(4px);
+      max-width: min(320px, 70vw);
+    }
+
+    #hud h1 {
+      margin: 0 0 6px;
+      font-size: 1.05rem;
+    }
+
+    #hud p {
+      margin: 0;
+      line-height: 1.4;
+      font-size: 0.88rem;
+    }
+
+    #speed,
+    #altitude {
+      font-weight: 700;
+    }
+
+    canvas {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <aside id="hud">
+    <h1>Sky Glide 3D</h1>
+    <p>
+      WASD flight controls: W/S pitch, A/D roll. Turns are coordinated by bank angle.<br />
+      Airspeed: <span id="speed">0</span> u/s | Altitude: <span id="altitude">0</span> m
+    </p>
+  </aside>
+
+  <script type="module">
+    import * as THREE from 'https://unpkg.com/three@0.161.0/build/three.module.js';
+
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.Fog(0xbde8ff, 120, 550);
+
+    const camera = new THREE.PerspectiveCamera(68, window.innerWidth / window.innerHeight, 0.1, 2000);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    document.body.appendChild(renderer.domElement);
+
+    const hemiLight = new THREE.HemisphereLight(0xffffff, 0x355c7d, 1.2);
+    scene.add(hemiLight);
+
+    const sun = new THREE.DirectionalLight(0xffffff, 1.15);
+    sun.position.set(120, 220, 80);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(1024, 1024);
+    sun.shadow.camera.near = 20;
+    sun.shadow.camera.far = 700;
+    sun.shadow.camera.left = -300;
+    sun.shadow.camera.right = 300;
+    sun.shadow.camera.top = 300;
+    sun.shadow.camera.bottom = -300;
+    scene.add(sun);
+
+    // Ground and simple repeating markers to show movement.
+    const ground = new THREE.Mesh(
+      new THREE.PlaneGeometry(2200, 2200, 12, 12),
+      new THREE.MeshStandardMaterial({ color: 0x45a14d, roughness: 0.95, metalness: 0.02 })
+    );
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.y = -2;
+    ground.receiveShadow = true;
+    scene.add(ground);
+
+    const markerGroup = new THREE.Group();
+    scene.add(markerGroup);
+
+    const markerGeo = new THREE.BoxGeometry(4, 10, 4);
+    const markerMat = new THREE.MeshStandardMaterial({ color: 0x2f7f34, roughness: 0.9 });
+
+    for (let i = 0; i < 180; i += 1) {
+      const tree = new THREE.Mesh(markerGeo, markerMat);
+      tree.position.set((Math.random() - 0.5) * 1800, 3, (Math.random() - 0.5) * 1800);
+      tree.castShadow = true;
+      markerGroup.add(tree);
+    }
+
+    // Stylized plane built from basic shapes.
+    const plane = new THREE.Group();
+
+    const body = new THREE.Mesh(
+      new THREE.CapsuleGeometry(1.2, 5.5, 8, 14),
+      new THREE.MeshStandardMaterial({ color: 0xe7ebf3, metalness: 0.22, roughness: 0.42 })
+    );
+    body.rotation.z = Math.PI / 2;
+    body.castShadow = true;
+    plane.add(body);
+
+    const cockpit = new THREE.Mesh(
+      new THREE.SphereGeometry(1.05, 22, 20),
+      new THREE.MeshStandardMaterial({ color: 0x4f7abf, transparent: true, opacity: 0.7, roughness: 0.25 })
+    );
+    cockpit.scale.set(1.4, 0.7, 1);
+    cockpit.position.set(1.2, 0.52, 0);
+    cockpit.castShadow = true;
+    plane.add(cockpit);
+
+    const wingMat = new THREE.MeshStandardMaterial({ color: 0xd4403d, metalness: 0.16, roughness: 0.5 });
+    const wing = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.14, 7.7), wingMat);
+    wing.position.set(-0.2, -0.1, 0);
+    wing.castShadow = true;
+    plane.add(wing);
+
+    const tailWing = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.12, 2.8), wingMat);
+    tailWing.position.set(-3.35, 0.2, 0);
+    tailWing.castShadow = true;
+    plane.add(tailWing);
+
+    const fin = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.1, 0.14), wingMat);
+    fin.position.set(-3.5, 0.75, 0);
+    fin.castShadow = true;
+    plane.add(fin);
+
+    plane.position.set(0, 28, 0);
+    scene.add(plane);
+
+    // Flight state tuned for a more realistic "bank to turn" feel.
+    const flight = {
+      velocity: new THREE.Vector3(35, 0, 0),
+      verticalSpeed: 0,
+      speed: 42,
+      minSpeed: 18,
+      cruiseSpeed: 46,
+      maxSpeed: 92,
+      stallSpeed: 24,
+      pitchVel: 0,
+      rollVel: 0,
+      yawVel: 0,
+      pitchRate: 1.15,
+      rollRate: 1.75,
+      yawFromBank: 1.1,
+      angularDamping: 2.6,
+      liftCoeff: 0.011,
+      gravity: 9.8,
+      dragCoeff: 0.018,
+      thrust: 36
+    };
+
+    const keyState = new Set();
+    const speedEl = document.getElementById('speed');
+    const altitudeEl = document.getElementById('altitude');
+
+    window.addEventListener('keydown', (event) => {
+      keyState.add(event.key.toLowerCase());
+    });
+
+    window.addEventListener('keyup', (event) => {
+      keyState.delete(event.key.toLowerCase());
+    });
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    const clock = new THREE.Clock();
+
+    function updateFlight(dt) {
+      // WASD only: W/S = elevator (pitch), A/D = aileron (roll).
+      const pitchInput = (keyState.has('w') ? 1 : 0) - (keyState.has('s') ? 1 : 0);
+      // Positive roll is right-wing-down bank in this coordinate setup.
+      const rollInput = (keyState.has('d') ? 1 : 0) - (keyState.has('a') ? 1 : 0);
+
+      const controlAuthority = THREE.MathUtils.clamp((flight.speed - flight.stallSpeed) / 22, 0.22, 1);
+
+      flight.pitchVel += pitchInput * flight.pitchRate * controlAuthority * dt;
+      flight.rollVel += rollInput * flight.rollRate * controlAuthority * dt;
+
+      const bank = plane.rotation.x;
+      const speedFactor = THREE.MathUtils.clamp(flight.speed / flight.cruiseSpeed, 0.35, 1.35);
+
+      // Roll stability: aircraft tends to level wings when stick is neutral.
+      const autoLevelStrength = 0.8;
+      const rollDampingFromBank = 0.5;
+      flight.rollVel += (-bank * autoLevelStrength - flight.rollVel * rollDampingFromBank) * dt;
+
+      // Coordinated-turn behavior: bank drives yaw, and pitch slightly tightens turn.
+      const pitchFactor = 1 + Math.max(0, plane.rotation.z) * 0.25;
+      flight.yawVel += -Math.sin(bank) * flight.yawFromBank * speedFactor * pitchFactor * dt;
+
+      const damping = Math.exp(-flight.angularDamping * dt);
+      flight.pitchVel *= damping;
+      flight.rollVel *= damping;
+      flight.yawVel *= Math.exp(-(flight.angularDamping + 0.6) * dt);
+
+      // Plane forward axis is X, so pitch rotates around Z and roll rotates around X.
+      plane.rotateZ(flight.pitchVel * dt);
+      plane.rotateX(flight.rollVel * dt);
+      plane.rotateY(flight.yawVel * dt);
+
+      plane.rotation.z = THREE.MathUtils.clamp(plane.rotation.z, -0.85, 0.85);
+      plane.rotation.x = THREE.MathUtils.clamp(plane.rotation.x, -1.2, 1.2);
+
+      const forward = new THREE.Vector3(1, 0, 0).applyQuaternion(plane.quaternion);
+
+      const drag = flight.dragCoeff * flight.speed * flight.speed;
+      const climbPenalty = Math.max(0, forward.y) * 16;
+      flight.speed += (flight.thrust - drag - climbPenalty) * dt;
+      flight.speed = THREE.MathUtils.clamp(flight.speed, flight.minSpeed, flight.maxSpeed);
+
+      const bankLiftLoss = Math.cos(bank);
+      const lift = flight.liftCoeff * flight.speed * flight.speed * bankLiftLoss;
+      const stallSink = Math.max(0, (flight.stallSpeed - flight.speed) * 0.9);
+      flight.verticalSpeed += (lift - flight.gravity - stallSink) * dt;
+      flight.verticalSpeed *= Math.exp(-0.3 * dt);
+
+      flight.velocity.lerp(forward.multiplyScalar(flight.speed), 1 - Math.exp(-7 * dt));
+      flight.velocity.y += flight.verticalSpeed * dt;
+      plane.position.addScaledVector(flight.velocity, dt);
+
+      // Soft floor so the player cannot clip through terrain.
+      if (plane.position.y < 3.5) {
+        plane.position.y = 3.5;
+        flight.verticalSpeed = Math.max(0, flight.verticalSpeed * 0.25);
+        plane.rotation.z = THREE.MathUtils.lerp(plane.rotation.z, -0.03, 0.15);
+      }
+
+      // Keep world feeling endless by wrapping objects.
+      markerGroup.children.forEach((tree) => {
+        if (tree.position.distanceTo(plane.position) > 950) {
+          tree.position.set(
+            plane.position.x + (Math.random() - 0.5) * 1500,
+            3,
+            plane.position.z + (Math.random() - 0.5) * 1500
+          );
+        }
+      });
+
+      speedEl.textContent = flight.speed.toFixed(0);
+      altitudeEl.textContent = plane.position.y.toFixed(0);
+    }
+
+    function updateCamera(dt) {
+      const chaseOffset = new THREE.Vector3(-17, 7, 0).applyQuaternion(plane.quaternion);
+      const targetPos = plane.position.clone().add(chaseOffset);
+      camera.position.lerp(targetPos, 1 - Math.exp(-5 * dt));
+
+      const lookTarget = plane.position.clone().add(new THREE.Vector3(9, 1.5, 0).applyQuaternion(plane.quaternion));
+      camera.lookAt(lookTarget);
+    }
+
+    function animate() {
+      const dt = Math.min(clock.getDelta(), 0.032);
+      updateFlight(dt);
+      updateCamera(dt);
+      renderer.render(scene, camera);
+      requestAnimationFrame(animate);
+    }
+
+    animate();
+  </script>
+</body>
+</html>
