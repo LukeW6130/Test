@@ -194,7 +194,8 @@
     function updateFlight(dt) {
       // WASD only: W/S = elevator (pitch), A/D = aileron (roll).
       const pitchInput = (keyState.has('w') ? 1 : 0) - (keyState.has('s') ? 1 : 0);
-      const rollInput = (keyState.has('a') ? 1 : 0) - (keyState.has('d') ? 1 : 0);
+      // Positive roll is right-wing-down bank in this coordinate setup.
+      const rollInput = (keyState.has('d') ? 1 : 0) - (keyState.has('a') ? 1 : 0);
 
       const controlAuthority = THREE.MathUtils.clamp((flight.speed - flight.stallSpeed) / 22, 0.22, 1);
 
@@ -203,7 +204,15 @@
 
       const bank = plane.rotation.x;
       const speedFactor = THREE.MathUtils.clamp(flight.speed / flight.cruiseSpeed, 0.35, 1.35);
-      flight.yawVel += -Math.sin(bank) * flight.yawFromBank * speedFactor * dt;
+
+      // Roll stability: aircraft tends to level wings when stick is neutral.
+      const autoLevelStrength = 0.8;
+      const rollDampingFromBank = 0.5;
+      flight.rollVel += (-bank * autoLevelStrength - flight.rollVel * rollDampingFromBank) * dt;
+
+      // Coordinated-turn behavior: bank drives yaw, and pitch slightly tightens turn.
+      const pitchFactor = 1 + Math.max(0, plane.rotation.z) * 0.25;
+      flight.yawVel += -Math.sin(bank) * flight.yawFromBank * speedFactor * pitchFactor * dt;
 
       const damping = Math.exp(-flight.angularDamping * dt);
       flight.pitchVel *= damping;
@@ -225,7 +234,8 @@
       flight.speed += (flight.thrust - drag - climbPenalty) * dt;
       flight.speed = THREE.MathUtils.clamp(flight.speed, flight.minSpeed, flight.maxSpeed);
 
-      const lift = flight.liftCoeff * flight.speed * flight.speed * Math.cos(plane.rotation.x);
+      const bankLiftLoss = Math.cos(bank);
+      const lift = flight.liftCoeff * flight.speed * flight.speed * bankLiftLoss;
       const stallSink = Math.max(0, (flight.stallSpeed - flight.speed) * 0.9);
       flight.verticalSpeed += (lift - flight.gravity - stallSink) * dt;
       flight.verticalSpeed *= Math.exp(-0.3 * dt);
