@@ -20,6 +20,13 @@ python3 -m http.server 8000
 Then open: <http://localhost:8000>
 
 > If your folder name is different, use `cd <your-folder-name>` instead of `cd Test`.
+## Run locally
+
+```bash
+python3 -m http.server 8000
+```
+
+Then open <http://localhost:8000>.
 
 ## Controls
 
