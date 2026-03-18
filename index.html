@@ -112,36 +112,30 @@
       return -10 + base + ridges + hills;
     }
 
-    const terrainSize = 2600;
-    const terrainSegments = 160;
-    const terrainTileStep = 140;
-    const terrainGeo = new THREE.PlaneGeometry(terrainSize, terrainSize, terrainSegments, terrainSegments);
-    const terrainColors = new Float32Array((terrainSegments + 1) * (terrainSegments + 1) * 3);
-    terrainGeo.setAttribute('color', new THREE.Float32BufferAttribute(terrainColors, 3));
+    const CHUNK_SIZE = 400;
+    const CHUNK_SEGMENTS = 80;
+    const CHUNK_WORLD_SIZE = CHUNK_SIZE;
+    const RENDER_DISTANCE = 1;
 
-    const ground = new THREE.Mesh(
-      terrainGeo,
-      new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.96, metalness: 0.03, flatShading: true })
-    );
-    ground.rotation.x = -Math.PI / 2;
-    ground.receiveShadow = true;
-    scene.add(ground);
+    const chunks = new Map();
 
-    let terrainCenterX = Number.NaN;
-    let terrainCenterZ = Number.NaN;
-    let terrainNormalRefreshCountdown = 0;
+    function chunkKey(cx, cz) {
+      return `${cx},${cz}`;
+    }
 
-    function updateTerrain(centerX, centerZ) {
-      terrainCenterX = Math.round(centerX / terrainTileStep) * terrainTileStep;
-      terrainCenterZ = Math.round(centerZ / terrainTileStep) * terrainTileStep;
+    function updateChunkGeometry(mesh, cx, cz) {
+      const geo = mesh.geometry;
+      const pos = geo.attributes.position;
+      const color = geo.attributes.color;
 
-      const pos = terrainGeo.attributes.position;
-      const color = terrainGeo.attributes.color;
+      const worldOffsetX = cx * CHUNK_WORLD_SIZE;
+      const worldOffsetZ = cz * CHUNK_WORLD_SIZE;
+
       for (let i = 0; i < pos.count; i += 1) {
         const localX = pos.getX(i);
         const localZ = pos.getY(i);
-        const worldX = localX + terrainCenterX;
-        const worldZ = localZ + terrainCenterZ;
+        const worldX = localX + worldOffsetX;
+        const worldZ = localZ + worldOffsetZ;
         const h = terrainHeightAt(worldX, worldZ);
         pos.setZ(i, h);
 
@@ -151,12 +145,59 @@
 
       pos.needsUpdate = true;
       color.needsUpdate = true;
-      terrainNormalRefreshCountdown -= 1;
-      if (terrainNormalRefreshCountdown <= 0) {
-        terrainGeo.computeVertexNormals();
-        terrainNormalRefreshCountdown = 2;
+      mesh.position.set(worldOffsetX, 0, worldOffsetZ);
+    }
+
+    function createChunk(cx, cz) {
+      const geo = new THREE.PlaneGeometry(CHUNK_SIZE, CHUNK_SIZE, CHUNK_SEGMENTS, CHUNK_SEGMENTS);
+      const colors = new Float32Array((CHUNK_SEGMENTS + 1) * (CHUNK_SEGMENTS + 1) * 3);
+      geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+
+      const mesh = new THREE.Mesh(
+        geo,
+        new THREE.MeshStandardMaterial({
+          vertexColors: true,
+          roughness: 0.96,
+          metalness: 0.03,
+          flatShading: true
+        })
+      );
+
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.receiveShadow = true;
+
+      updateChunkGeometry(mesh, cx, cz);
+      scene.add(mesh);
+
+      return { mesh, cx, cz };
+    }
+
+    function updateChunks(playerX, playerZ) {
+      const centerCX = Math.floor(playerX / CHUNK_WORLD_SIZE);
+      const centerCZ = Math.floor(playerZ / CHUNK_WORLD_SIZE);
+      const needed = new Set();
+
+      for (let x = -RENDER_DISTANCE; x <= RENDER_DISTANCE; x += 1) {
+        for (let z = -RENDER_DISTANCE; z <= RENDER_DISTANCE; z += 1) {
+          const cx = centerCX + x;
+          const cz = centerCZ + z;
+          const key = chunkKey(cx, cz);
+          needed.add(key);
+
+          if (!chunks.has(key)) {
+            chunks.set(key, createChunk(cx, cz));
+          }
+        }
       }
-      ground.position.set(terrainCenterX, 0, terrainCenterZ);
+
+      for (const [key, chunk] of chunks) {
+        if (!needed.has(key)) {
+          scene.remove(chunk.mesh);
+          chunk.mesh.geometry.dispose();
+          chunk.mesh.material.dispose();
+          chunks.delete(key);
+        }
+      }
     }
 
     // Terrain markers (stylized trees) follow terrain elevation.
@@ -223,7 +264,7 @@
 
     planeYaw.position.set(0, 55, 0);
     scene.add(planeYaw);
-    updateTerrain(0, 0);
+    updateChunks(planeYaw.position.x, planeYaw.position.z);
 
     // Flight state with explicit angular state and acceleration-based vertical motion.
     const flight = {
@@ -353,11 +394,7 @@
         flight.pitchVel *= 0.6;
       }
 
-      const newCenterX = Math.round(planeYaw.position.x / terrainTileStep) * terrainTileStep;
-      const newCenterZ = Math.round(planeYaw.position.z / terrainTileStep) * terrainTileStep;
-      if (newCenterX !== terrainCenterX || newCenterZ !== terrainCenterZ) {
-        updateTerrain(newCenterX, newCenterZ);
-      }
+      updateChunks(planeYaw.position.x, planeYaw.position.z);
 
       markerRefreshTimer += dt;
       if (markerRefreshTimer >= 0.08) {
