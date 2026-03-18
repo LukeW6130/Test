@@ -10,7 +10,7 @@
       width: 100%;
       height: 100%;
       overflow: hidden;
-      background: linear-gradient(180deg, #4b79b8 0%, #89b8ee 35%, #d7ebff 72%, #f6fbff 100%);
+      background: linear-gradient(180deg, #466d9b 0%, #7fa7db 32%, #d8eaff 72%, #f8fcff 100%);
       font-family: Arial, Helvetica, sans-serif;
       color: #0a2740;
     }
@@ -47,42 +47,48 @@
     import * as THREE from 'https://unpkg.com/three@0.161.0/build/three.module.js';
 
     const scene = new THREE.Scene();
-    scene.fog = new THREE.Fog(0xcfe2ff, 240, 1500);
+    scene.fog = new THREE.Fog(0xd4e5ff, 260, 2200);
 
-    const camera = new THREE.PerspectiveCamera(68, window.innerWidth / window.innerHeight, 0.1, 2400);
+    const camera = new THREE.PerspectiveCamera(68, window.innerWidth / window.innerHeight, 0.1, 3200);
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.shadowMap.enabled = true;
     document.body.appendChild(renderer.domElement);
 
-    scene.add(new THREE.HemisphereLight(0xd7e8ff, 0x38536d, 1.35));
-    const sun = new THREE.DirectionalLight(0xfff1d6, 1.35);
-    sun.position.set(160, 240, 120);
+    const hemi = new THREE.HemisphereLight(0xdeebff, 0x35506a, 1.4);
+    scene.add(hemi);
+
+    const sun = new THREE.DirectionalLight(0xffefcf, 1.4);
+    sun.position.set(240, 260, 140);
     sun.castShadow = true;
     sun.shadow.mapSize.set(1024, 1024);
     sun.shadow.camera.near = 20;
-    sun.shadow.camera.far = 1200;
-    sun.shadow.camera.left = -420;
-    sun.shadow.camera.right = 420;
-    sun.shadow.camera.top = 420;
-    sun.shadow.camera.bottom = -420;
+    sun.shadow.camera.far = 1400;
+    sun.shadow.camera.left = -520;
+    sun.shadow.camera.right = 520;
+    sun.shadow.camera.top = 520;
+    sun.shadow.camera.bottom = -520;
     scene.add(sun);
 
-    const fillLight = new THREE.DirectionalLight(0xbfd7ff, 0.28);
-    fillLight.position.set(-180, 90, -120);
+    const fillLight = new THREE.DirectionalLight(0xb7d2ff, 0.32);
+    fillLight.position.set(-220, 120, -140);
     scene.add(fillLight);
 
-    const skyGeo = new THREE.SphereGeometry(2200, 32, 18);
+    const skyGeo = new THREE.SphereGeometry(2600, 36, 20);
+    const sunDirection = sun.position.clone().normalize();
     const skyMat = new THREE.ShaderMaterial({
       side: THREE.BackSide,
       depthWrite: false,
       uniforms: {
-        topColor: { value: new THREE.Color(0x2d5f9a) },
-        horizonColor: { value: new THREE.Color(0xbfdcff) },
-        bottomColor: { value: new THREE.Color(0xf9fdff) },
-        offset: { value: 40 },
-        exponent: { value: 0.7 }
+        topColor: { value: new THREE.Color(0x2d5d97) },
+        horizonColor: { value: new THREE.Color(0xc9defd) },
+        bottomColor: { value: new THREE.Color(0xf8fbff) },
+        hazeColor: { value: new THREE.Color(0xf7e6ca) },
+        sunColor: { value: new THREE.Color(0xfff2c9) },
+        sunDirection: { value: sunDirection },
+        offset: { value: 35 },
+        exponent: { value: 0.72 }
       },
       vertexShader: `
         varying vec3 vWorldPosition;
@@ -96,16 +102,26 @@
         uniform vec3 topColor;
         uniform vec3 horizonColor;
         uniform vec3 bottomColor;
+        uniform vec3 hazeColor;
+        uniform vec3 sunColor;
+        uniform vec3 sunDirection;
         uniform float offset;
         uniform float exponent;
         varying vec3 vWorldPosition;
 
         void main() {
-          float h = normalize(vWorldPosition + vec3(0.0, offset, 0.0)).y;
+          vec3 dir = normalize(vWorldPosition + vec3(0.0, offset, 0.0));
+          float h = dir.y;
           float topMix = max(pow(max(h, 0.0), exponent), 0.0);
-          float bottomMix = max(pow(max(-h, 0.0), exponent * 1.2), 0.0);
+          float bottomMix = max(pow(max(-h, 0.0), exponent * 1.25), 0.0);
+          float hazeBand = smoothstep(-0.08, 0.12, h) * (1.0 - smoothstep(0.12, 0.42, h));
+          float sunGlow = pow(max(dot(dir, normalize(sunDirection)), 0.0), 96.0);
+          float sunHalo = pow(max(dot(dir, normalize(sunDirection)), 0.0), 12.0) * 0.22;
+
           vec3 color = mix(horizonColor, topColor, topMix);
-          color = mix(color, bottomColor, bottomMix * 0.85);
+          color = mix(color, bottomColor, bottomMix * 0.82);
+          color = mix(color, hazeColor, hazeBand * 0.22 + sunHalo);
+          color += sunColor * sunGlow * 0.95;
           gl_FragColor = vec4(color, 1.0);
         }
       `
@@ -113,7 +129,6 @@
     const skyDome = new THREE.Mesh(skyGeo, skyMat);
     scene.add(skyDome);
 
-    // --- Procedural terrain -------------------------------------------------
     function hash2(x, z) {
       const s = Math.sin(x * 127.1 + z * 311.7) * 43758.5453;
       return s - Math.floor(s);
@@ -159,10 +174,11 @@
     const CHUNK_SIZE = 400;
     const CHUNK_SEGMENTS = 80;
     const CHUNK_WORLD_SIZE = CHUNK_SIZE;
-    const RENDER_DISTANCE = 2;
+    const RENDER_DISTANCE = 3;
 
     const chunks = new Map();
-    const worldOrigin = new THREE.Vector3();
+    const renderOrigin = new THREE.Vector3();
+    const renderOriginTarget = new THREE.Vector3();
     const floatingOriginThreshold = CHUNK_SIZE * 0.5;
 
     function chunkKey(cx, cz) {
@@ -173,7 +189,6 @@
       const geo = mesh.geometry;
       const pos = geo.attributes.position;
       const color = geo.attributes.color;
-
       const worldOffsetX = cx * CHUNK_WORLD_SIZE;
       const worldOffsetZ = cz * CHUNK_WORLD_SIZE;
 
@@ -191,7 +206,7 @@
 
       pos.needsUpdate = true;
       color.needsUpdate = true;
-      mesh.position.set(worldOffsetX - worldOrigin.x, 0, worldOffsetZ - worldOrigin.z);
+      mesh.position.set(worldOffsetX - renderOrigin.x, 0, worldOffsetZ - renderOrigin.z);
     }
 
     function createChunk(cx, cz) {
@@ -209,13 +224,21 @@
           flatShading: true
         })
       );
-
       mesh.receiveShadow = true;
 
       updateChunkGeometry(mesh, cx, cz);
       scene.add(mesh);
-
       return { mesh, cx, cz };
+    }
+
+    function syncChunkRenderPositions() {
+      for (const chunk of chunks.values()) {
+        chunk.mesh.position.set(
+          chunk.cx * CHUNK_WORLD_SIZE - renderOrigin.x,
+          0,
+          chunk.cz * CHUNK_WORLD_SIZE - renderOrigin.z
+        );
+      }
     }
 
     function updateChunks(playerX, playerZ) {
@@ -229,7 +252,6 @@
           const cz = centerCZ + z;
           const key = chunkKey(cx, cz);
           needed.add(key);
-
           if (!chunks.has(key)) {
             chunks.set(key, createChunk(cx, cz));
           }
@@ -246,7 +268,6 @@
       }
     }
 
-    // Terrain markers (stylized trees) follow terrain elevation.
     const markerGroup = new THREE.Group();
     scene.add(markerGroup);
     const markerGeo = new THREE.ConeGeometry(2.2, 10, 6);
@@ -256,22 +277,28 @@
       const terrainY = terrainHeightAt(x, z);
       tree.userData.worldX = x;
       tree.userData.worldZ = z;
-      tree.position.set(x - worldOrigin.x, terrainY + 5, z - worldOrigin.z);
+      tree.position.set(x - renderOrigin.x, terrainY + 5, z - renderOrigin.z);
+    }
+
+    function syncMarkerRenderPositions() {
+      markerGroup.children.forEach((tree) => {
+        tree.position.x = tree.userData.worldX - renderOrigin.x;
+        tree.position.z = tree.userData.worldZ - renderOrigin.z;
+      });
     }
 
     const markerResetDistance = CHUNK_WORLD_SIZE * (RENDER_DISTANCE + 1.75);
     const markerResetDistanceSq = markerResetDistance * markerResetDistance;
 
-    for (let i = 0; i < 360; i += 1) {
+    for (let i = 0; i < 420; i += 1) {
       const tree = new THREE.Mesh(markerGeo, markerMat);
-      const x = (Math.random() - 0.5) * 2100;
-      const z = (Math.random() - 0.5) * 2100;
+      const x = (Math.random() - 0.5) * 3000;
+      const z = (Math.random() - 0.5) * 3000;
       placeMarker(tree, x, z);
       tree.castShadow = true;
       markerGroup.add(tree);
     }
 
-    // Plane rig uses separate yaw/roll/pitch nodes to avoid awkward Euler coupling.
     const planeYaw = new THREE.Group();
     const planeRoll = new THREE.Group();
     const planePitch = new THREE.Group();
@@ -313,35 +340,15 @@
     fin.castShadow = true;
     plane.add(fin);
 
-    planeYaw.position.set(0, 55, 0);
     scene.add(planeYaw);
-    updateChunks(planeYaw.position.x, planeYaw.position.z);
 
-    function rebaseWorld(shiftX, shiftZ) {
-      if (shiftX === 0 && shiftZ === 0) {
-        return;
-      }
+    const planeWorld = new THREE.Vector3(0, 55, 0);
+    renderOrigin.copy(planeWorld);
+    renderOrigin.y = 0;
+    renderOriginTarget.copy(renderOrigin);
+    planeYaw.position.set(0, planeWorld.y, 0);
+    updateChunks(planeWorld.x, planeWorld.z);
 
-      worldOrigin.x += shiftX;
-      worldOrigin.z += shiftZ;
-
-      planeYaw.position.x -= shiftX;
-      planeYaw.position.z -= shiftZ;
-      camera.position.x -= shiftX;
-      camera.position.z -= shiftZ;
-
-      for (const chunk of chunks.values()) {
-        chunk.mesh.position.x -= shiftX;
-        chunk.mesh.position.z -= shiftZ;
-      }
-
-      markerGroup.children.forEach((tree) => {
-        tree.position.x -= shiftX;
-        tree.position.z -= shiftZ;
-      });
-    }
-
-    // Flight state with explicit angular state and acceleration-based vertical motion.
     const flight = {
       velocity: new THREE.Vector3(55, 0, 0),
       verticalSpeed: 0,
@@ -394,12 +401,38 @@
     const targetPosVec = new THREE.Vector3();
     const lookTargetVec = new THREE.Vector3();
 
+    function updateRenderOrigin(dt) {
+      if (
+        Math.abs(planeWorld.x - renderOriginTarget.x) > floatingOriginThreshold
+        || Math.abs(planeWorld.z - renderOriginTarget.z) > floatingOriginThreshold
+      ) {
+        renderOriginTarget.x = planeWorld.x;
+        renderOriginTarget.z = planeWorld.z;
+      }
+
+      const blend = 1 - Math.exp(-6 * dt);
+      renderOrigin.lerp(renderOriginTarget, blend);
+      renderOrigin.y = 0;
+      if (renderOrigin.distanceToSquared(renderOriginTarget) < 0.0001) {
+        renderOrigin.copy(renderOriginTarget);
+      }
+    }
+
+    function syncRenderedWorld() {
+      planeYaw.position.set(
+        planeWorld.x - renderOrigin.x,
+        planeWorld.y,
+        planeWorld.z - renderOrigin.z
+      );
+      syncChunkRenderPositions();
+      syncMarkerRenderPositions();
+    }
+
     function updateFlight(dt) {
       const pitchInput = (keyState.has('w') ? 1 : 0) - (keyState.has('s') ? 1 : 0);
       const rollInput = (keyState.has('d') ? 1 : 0) - (keyState.has('a') ? 1 : 0);
       const yawInput = (keyState.has('q') ? 1 : 0) - (keyState.has('e') ? 1 : 0);
 
-      // Smooth control inputs to remove jitter and key-tap harshness.
       const inputSmoothing = 1 - Math.exp(-16 * dt);
       flight.pitchInputSmoothed = THREE.MathUtils.lerp(flight.pitchInputSmoothed, pitchInput, inputSmoothing);
       flight.rollInputSmoothed = THREE.MathUtils.lerp(flight.rollInputSmoothed, rollInput, inputSmoothing);
@@ -410,7 +443,6 @@
       flight.rollVel += flight.rollInputSmoothed * flight.rollRate * controlAuthority * dt;
       flight.yawVel += flight.yawInputSmoothed * flight.rudderRate * controlAuthority * dt;
 
-      // Stability and coordinated turn behavior.
       flight.rollVel += (-flight.roll * 0.78 - flight.rollVel * 1.08) * dt;
       const nearPitchLimit = THREE.MathUtils.clamp(Math.abs(flight.pitch) / 0.92, 0, 1);
       flight.pitchVel += -Math.sign(flight.pitch) * nearPitchLimit * nearPitchLimit * 1.9 * dt;
@@ -459,43 +491,36 @@
       desiredVelocity.copy(forward).multiplyScalar(flight.speed);
       desiredVelocity.y = flight.verticalSpeed;
       flight.velocity.copy(desiredVelocity);
-      planeYaw.position.addScaledVector(flight.velocity, dt);
+      planeWorld.addScaledVector(flight.velocity, dt);
 
-      const planeWorldX = worldOrigin.x + planeYaw.position.x;
-      const planeWorldZ = worldOrigin.z + planeYaw.position.z;
-      const floorHeight = terrainHeightAt(planeWorldX, planeWorldZ) + 4;
-      if (planeYaw.position.y < floorHeight) {
-        planeYaw.position.y = floorHeight;
+      const floorHeight = terrainHeightAt(planeWorld.x, planeWorld.z) + 4;
+      if (planeWorld.y < floorHeight) {
+        planeWorld.y = floorHeight;
         flight.verticalSpeed = 0;
         flight.pitch *= 0.96;
         flight.pitchVel *= 0.6;
       }
 
-      if (
-        Math.abs(planeYaw.position.x) > floatingOriginThreshold
-        || Math.abs(planeYaw.position.z) > floatingOriginThreshold
-      ) {
-        rebaseWorld(planeYaw.position.x, planeYaw.position.z);
-      }
-
-      updateChunks(planeWorldX, planeWorldZ);
+      updateRenderOrigin(dt);
+      syncRenderedWorld();
+      updateChunks(planeWorld.x, planeWorld.z);
 
       markerRefreshTimer += dt;
       if (markerRefreshTimer >= 0.08) {
         markerRefreshTimer = 0;
         markerGroup.children.forEach((tree) => {
-          const dx = tree.userData.worldX - planeWorldX;
-          const dz = tree.userData.worldZ - planeWorldZ;
+          const dx = tree.userData.worldX - planeWorld.x;
+          const dz = tree.userData.worldZ - planeWorld.z;
           if (dx * dx + dz * dz > markerResetDistanceSq) {
-            const x = planeWorldX + (Math.random() - 0.5) * 1700;
-            const z = planeWorldZ + (Math.random() - 0.5) * 1700;
+            const x = planeWorld.x + (Math.random() - 0.5) * 1700;
+            const z = planeWorld.z + (Math.random() - 0.5) * 1700;
             placeMarker(tree, x, z);
           }
         });
       }
 
       speedEl.textContent = flight.speed.toFixed(0);
-      altitudeEl.textContent = Math.max(0, planeYaw.position.y - terrainHeightAt(planeWorldX, planeWorldZ)).toFixed(0);
+      altitudeEl.textContent = Math.max(0, planeWorld.y - terrainHeightAt(planeWorld.x, planeWorld.z)).toFixed(0);
     }
 
     function updateCamera(dt) {
@@ -517,7 +542,6 @@
         substeps += 1;
       }
 
-      // Avoid catch-up spirals that appear as visual skipping on slower frames.
       if (substeps === 5 && accumulator > fixedStep * 2) {
         accumulator = fixedStep;
       }
