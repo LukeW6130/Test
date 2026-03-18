@@ -38,7 +38,7 @@
   <aside id="hud">
     <h1>Sky Glide 3D</h1>
     <p>
-      WASD flight controls: W/S pitch, A/D roll. Shift = afterburner boost.<br />
+      WASD flight controls: W/S pitch, A/D roll, Q/E yaw. Shift = afterburner boost.<br />
       Airspeed: <span id="speed">0</span> u/s | Altitude: <span id="altitude">0</span> m
     </p>
   </aside>
@@ -210,10 +210,12 @@
       yawVel: 0,
       pitchInputSmoothed: 0,
       rollInputSmoothed: 0,
-      pitchRate: 2.15,
-      rollRate: 2.9,
-      yawFromBank: 1.9,
-      angularDamping: 3.35,
+      yawInputSmoothed: 0,
+      pitchRate: 2.1,
+      rollRate: 2.8,
+      rudderRate: 1.65,
+      yawFromBank: 1.75,
+      angularDamping: 3.4,
       liftCoeff: 0.0027,
       gravity: 9.8,
       dragCoeff: 0.010,
@@ -235,49 +237,61 @@
     const clock = new THREE.Clock();
     const fixedStep = 1 / 120;
     let accumulator = 0;
+    let markerRefreshTimer = 0;
+    const forwardVec = new THREE.Vector3();
+    const desiredVelocity = new THREE.Vector3();
 
     function updateFlight(dt) {
       const pitchInput = (keyState.has('w') ? 1 : 0) - (keyState.has('s') ? 1 : 0);
       const rollInput = (keyState.has('d') ? 1 : 0) - (keyState.has('a') ? 1 : 0);
+      const yawInput = (keyState.has('q') ? 1 : 0) - (keyState.has('e') ? 1 : 0);
 
       // Smooth control inputs to remove jitter and key-tap harshness.
-      const inputSmoothing = 1 - Math.exp(-12 * dt);
+      const inputSmoothing = 1 - Math.exp(-16 * dt);
       flight.pitchInputSmoothed = THREE.MathUtils.lerp(flight.pitchInputSmoothed, pitchInput, inputSmoothing);
       flight.rollInputSmoothed = THREE.MathUtils.lerp(flight.rollInputSmoothed, rollInput, inputSmoothing);
+      flight.yawInputSmoothed = THREE.MathUtils.lerp(flight.yawInputSmoothed, yawInput, inputSmoothing);
 
-      const controlAuthority = THREE.MathUtils.clamp((flight.speed - flight.stallSpeed) / 26, 0.32, 1.3);
+      const controlAuthority = THREE.MathUtils.clamp((flight.speed - flight.stallSpeed) / 26, 0.35, 1.28);
       flight.pitchVel += flight.pitchInputSmoothed * flight.pitchRate * controlAuthority * dt;
       flight.rollVel += flight.rollInputSmoothed * flight.rollRate * controlAuthority * dt;
+      flight.yawVel += flight.yawInputSmoothed * flight.rudderRate * controlAuthority * dt;
 
       const bank = plane.rotation.x;
       const pitchAngle = plane.rotation.z;
-      const speedFactor = THREE.MathUtils.clamp(flight.speed / flight.cruiseSpeed, 0.5, 1.65);
+      const speedFactor = THREE.MathUtils.clamp(flight.speed / flight.cruiseSpeed, 0.55, 1.6);
 
       // Auto-level and damping for smoother wings-level recovery.
-      flight.rollVel += (-bank * 0.9 - flight.rollVel * 0.95) * dt;
+      flight.rollVel += (-bank * 0.85 - flight.rollVel * 1.05) * dt;
 
       // Pitch anti-oscillation near limits.
-      const pitchLimit = 0.98;
+      const pitchLimit = 0.95;
       const nearPitchLimit = THREE.MathUtils.clamp(Math.abs(pitchAngle) / pitchLimit, 0, 1);
-      flight.pitchVel += -Math.sign(pitchAngle) * nearPitchLimit * nearPitchLimit * 2.4 * dt;
+      flight.pitchVel += -Math.sign(pitchAngle) * nearPitchLimit * nearPitchLimit * 2.1 * dt;
 
-      const pitchFactor = 1 + Math.max(0, pitchAngle) * 0.14;
+      // Banked turn yaw + rudder allows simultaneous pitch/yaw maneuvers.
+      const pitchFactor = 1 + Math.max(0, pitchAngle) * 0.12;
       flight.yawVel += -Math.sin(bank) * flight.yawFromBank * speedFactor * pitchFactor * dt;
 
+      // Hard-limit angular rates to avoid bursts and jank.
+      flight.pitchVel = THREE.MathUtils.clamp(flight.pitchVel, -2.4, 2.4);
+      flight.rollVel = THREE.MathUtils.clamp(flight.rollVel, -3.1, 3.1);
+      flight.yawVel = THREE.MathUtils.clamp(flight.yawVel, -2.2, 2.2);
+
       const baseDamping = Math.exp(-flight.angularDamping * dt);
-      const pitchDamping = Math.exp(-(flight.angularDamping + nearPitchLimit * 1.9) * dt);
+      const pitchDamping = Math.exp(-(flight.angularDamping + nearPitchLimit * 1.7) * dt);
       flight.pitchVel *= pitchDamping;
       flight.rollVel *= baseDamping;
-      flight.yawVel *= Math.exp(-(flight.angularDamping + 1.1) * dt);
+      flight.yawVel *= Math.exp(-(flight.angularDamping + 1.15) * dt);
 
       plane.rotateZ(flight.pitchVel * dt);
       plane.rotateX(flight.rollVel * dt);
       plane.rotateY(flight.yawVel * dt);
 
-      plane.rotation.z = THREE.MathUtils.clamp(plane.rotation.z, -0.98, 0.98);
-      plane.rotation.x = THREE.MathUtils.clamp(plane.rotation.x, -1.22, 1.22);
+      plane.rotation.z = THREE.MathUtils.clamp(plane.rotation.z, -0.95, 0.95);
+      plane.rotation.x = THREE.MathUtils.clamp(plane.rotation.x, -1.2, 1.2);
 
-      const forward = new THREE.Vector3(1, 0, 0).applyQuaternion(plane.quaternion);
+      const forward = forwardVec.set(1, 0, 0).applyQuaternion(plane.quaternion);
       const drag = flight.dragCoeff * flight.speed * flight.speed;
       const afterburnerBias = keyState.has('shift') ? 35 : 0;
       const climbPenalty = Math.max(0, forward.y) * 26;
@@ -286,14 +300,14 @@
 
       const bankLiftLoss = Math.max(0.2, Math.cos(bank));
       const lift = flight.liftCoeff * flight.speed * flight.speed * bankLiftLoss;
-      const stallSink = Math.max(0, (flight.stallSpeed - flight.speed) * 1.4);
-      const verticalAccel = (lift - flight.gravity - stallSink) + forward.y * flight.speed * 0.16;
+      const stallSink = Math.max(0, (flight.stallSpeed - flight.speed) * 1.35);
+      const verticalAccel = (lift - flight.gravity - stallSink) + forward.y * flight.speed * 0.15;
 
-      // Smooth vertical acceleration integration to avoid bobbing.
-      const verticalBlend = 1 - Math.exp(-4.2 * dt);
+      const verticalBlend = 1 - Math.exp(-4.8 * dt);
       flight.verticalSpeed = THREE.MathUtils.lerp(flight.verticalSpeed, verticalAccel, verticalBlend);
 
-      flight.velocity.lerp(forward.multiplyScalar(flight.speed), 1 - Math.exp(-9.5 * dt));
+      desiredVelocity.copy(forward).multiplyScalar(flight.speed);
+      flight.velocity.lerp(desiredVelocity, 1 - Math.exp(-9.5 * dt));
       flight.velocity.y = flight.verticalSpeed;
       plane.position.addScaledVector(flight.velocity, dt);
 
@@ -304,13 +318,18 @@
         plane.rotation.z = THREE.MathUtils.lerp(plane.rotation.z, -0.02, 0.15);
       }
 
-      markerGroup.children.forEach((tree) => {
-        if (tree.position.distanceTo(plane.position) > 1100) {
-          const x = plane.position.x + (Math.random() - 0.5) * 1700;
-          const z = plane.position.z + (Math.random() - 0.5) * 1700;
-          placeMarker(tree, x, z);
-        }
-      });
+      markerRefreshTimer += dt;
+      if (markerRefreshTimer >= 0.08) {
+        markerRefreshTimer = 0;
+        const resetDistanceSq = 1100 * 1100;
+        markerGroup.children.forEach((tree) => {
+          if (tree.position.distanceToSquared(plane.position) > resetDistanceSq) {
+            const x = plane.position.x + (Math.random() - 0.5) * 1700;
+            const z = plane.position.z + (Math.random() - 0.5) * 1700;
+            placeMarker(tree, x, z);
+          }
+        });
+      }
 
       speedEl.textContent = flight.speed.toFixed(0);
       altitudeEl.textContent = Math.max(0, plane.position.y - terrainHeightAt(plane.position.x, plane.position.z)).toFixed(0);
@@ -325,12 +344,19 @@
     }
 
     function animate() {
-      const dt = Math.min(clock.getDelta(), 0.05);
+      const dt = Math.min(clock.getDelta(), 0.04);
       accumulator += dt;
 
-      while (accumulator >= fixedStep) {
+      let substeps = 0;
+      while (accumulator >= fixedStep && substeps < 5) {
         updateFlight(fixedStep);
         accumulator -= fixedStep;
+        substeps += 1;
+      }
+
+      // Avoid catch-up spirals that appear as visual skipping on slower frames.
+      if (substeps === 5 && accumulator > fixedStep * 2) {
+        accumulator = fixedStep;
       }
 
       updateCamera(dt);
