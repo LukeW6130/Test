@@ -25,28 +25,13 @@
       border-radius: 10px;
       padding: 10px 12px;
       backdrop-filter: blur(4px);
-      max-width: min(320px, 70vw);
+      max-width: min(340px, 72vw);
     }
 
-    #hud h1 {
-      margin: 0 0 6px;
-      font-size: 1.05rem;
-    }
-
-    #hud p {
-      margin: 0;
-      line-height: 1.4;
-      font-size: 0.88rem;
-    }
-
-    #speed,
-    #altitude {
-      font-weight: 700;
-    }
-
-    canvas {
-      display: block;
-    }
+    #hud h1 { margin: 0 0 6px; font-size: 1.05rem; }
+    #hud p { margin: 0; line-height: 1.4; font-size: 0.88rem; }
+    #speed, #altitude { font-weight: 700; }
+    canvas { display: block; }
   </style>
 </head>
 <body>
@@ -62,57 +47,119 @@
     import * as THREE from 'https://unpkg.com/three@0.161.0/build/three.module.js';
 
     const scene = new THREE.Scene();
-    scene.fog = new THREE.Fog(0xbde8ff, 120, 550);
+    scene.fog = new THREE.Fog(0xbde8ff, 130, 700);
 
-    const camera = new THREE.PerspectiveCamera(68, window.innerWidth / window.innerHeight, 0.1, 2000);
-
+    const camera = new THREE.PerspectiveCamera(68, window.innerWidth / window.innerHeight, 0.1, 2400);
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.shadowMap.enabled = true;
     document.body.appendChild(renderer.domElement);
 
-    const hemiLight = new THREE.HemisphereLight(0xffffff, 0x355c7d, 1.2);
-    scene.add(hemiLight);
-
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x355c7d, 1.25));
     const sun = new THREE.DirectionalLight(0xffffff, 1.15);
     sun.position.set(120, 220, 80);
     sun.castShadow = true;
     sun.shadow.mapSize.set(1024, 1024);
     sun.shadow.camera.near = 20;
-    sun.shadow.camera.far = 700;
-    sun.shadow.camera.left = -300;
-    sun.shadow.camera.right = 300;
-    sun.shadow.camera.top = 300;
-    sun.shadow.camera.bottom = -300;
+    sun.shadow.camera.far = 1200;
+    sun.shadow.camera.left = -420;
+    sun.shadow.camera.right = 420;
+    sun.shadow.camera.top = 420;
+    sun.shadow.camera.bottom = -420;
     scene.add(sun);
 
-    // Ground and simple repeating markers to show movement.
+    // --- Procedural terrain -------------------------------------------------
+    function hash2(x, z) {
+      const s = Math.sin(x * 127.1 + z * 311.7) * 43758.5453;
+      return s - Math.floor(s);
+    }
+
+    function valueNoise2(x, z) {
+      const ix = Math.floor(x);
+      const iz = Math.floor(z);
+      const fx = x - ix;
+      const fz = z - iz;
+      const ux = fx * fx * (3 - 2 * fx);
+      const uz = fz * fz * (3 - 2 * fz);
+
+      const a = hash2(ix, iz);
+      const b = hash2(ix + 1, iz);
+      const c = hash2(ix, iz + 1);
+      const d = hash2(ix + 1, iz + 1);
+
+      const nx0 = a + (b - a) * ux;
+      const nx1 = c + (d - c) * ux;
+      return nx0 + (nx1 - nx0) * uz;
+    }
+
+    function fbm2(x, z) {
+      let sum = 0;
+      let amplitude = 0.55;
+      let frequency = 0.003;
+      for (let i = 0; i < 5; i += 1) {
+        sum += (valueNoise2(x * frequency, z * frequency) - 0.5) * 2 * amplitude;
+        amplitude *= 0.52;
+        frequency *= 2.02;
+      }
+      return sum;
+    }
+
+    function terrainHeightAt(x, z) {
+      const ridges = Math.abs(fbm2(x + 1200, z - 700)) * 18;
+      const base = fbm2(x, z) * 42;
+      const hills = Math.sin(x * 0.0022) * Math.cos(z * 0.002) * 14;
+      return -10 + base + ridges + hills;
+    }
+
+    const terrainSize = 2600;
+    const terrainSegments = 220;
+    const terrainGeo = new THREE.PlaneGeometry(terrainSize, terrainSize, terrainSegments, terrainSegments);
+    const pos = terrainGeo.attributes.position;
+    const colors = [];
+    for (let i = 0; i < pos.count; i += 1) {
+      const x = pos.getX(i);
+      const z = pos.getY(i);
+      const h = terrainHeightAt(x, z);
+      pos.setZ(i, h);
+
+      const t = THREE.MathUtils.clamp((h + 20) / 90, 0, 1);
+      const col = new THREE.Color().setRGB(0.13 + t * 0.22, 0.34 + t * 0.34, 0.14 + t * 0.18);
+      colors.push(col.r, col.g, col.b);
+    }
+    terrainGeo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    terrainGeo.computeVertexNormals();
+
     const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(2200, 2200, 12, 12),
-      new THREE.MeshStandardMaterial({ color: 0x45a14d, roughness: 0.95, metalness: 0.02 })
+      terrainGeo,
+      new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.96, metalness: 0.03, flatShading: false })
     );
     ground.rotation.x = -Math.PI / 2;
-    ground.position.y = -2;
     ground.receiveShadow = true;
     scene.add(ground);
 
+    // Terrain markers (stylized trees) follow terrain elevation.
     const markerGroup = new THREE.Group();
     scene.add(markerGroup);
-
-    const markerGeo = new THREE.BoxGeometry(4, 10, 4);
+    const markerGeo = new THREE.ConeGeometry(2.2, 10, 6);
     const markerMat = new THREE.MeshStandardMaterial({ color: 0x2f7f34, roughness: 0.9 });
 
-    for (let i = 0; i < 180; i += 1) {
+    function placeMarker(tree, x, z) {
+      const terrainY = terrainHeightAt(x, z);
+      tree.position.set(x, terrainY + 5, z);
+    }
+
+    for (let i = 0; i < 220; i += 1) {
       const tree = new THREE.Mesh(markerGeo, markerMat);
-      tree.position.set((Math.random() - 0.5) * 1800, 3, (Math.random() - 0.5) * 1800);
+      const x = (Math.random() - 0.5) * 2100;
+      const z = (Math.random() - 0.5) * 2100;
+      placeMarker(tree, x, z);
       tree.castShadow = true;
       markerGroup.add(tree);
     }
 
-    // Stylized plane built from basic shapes.
+    // Plane model.
     const plane = new THREE.Group();
-
     const body = new THREE.Mesh(
       new THREE.CapsuleGeometry(1.2, 5.5, 8, 14),
       new THREE.MeshStandardMaterial({ color: 0xe7ebf3, metalness: 0.22, roughness: 0.42 })
@@ -146,10 +193,10 @@
     fin.castShadow = true;
     plane.add(fin);
 
-    plane.position.set(0, 28, 0);
+    plane.position.set(0, 55, 0);
     scene.add(plane);
 
-    // Fighter-jet-inspired tuning: snappier controls with smoother pitch response.
+    // Fighter-jet-inspired tuning with corrected vertical balance.
     const flight = {
       velocity: new THREE.Vector3(55, 0, 0),
       verticalSpeed: 0,
@@ -165,7 +212,7 @@
       rollRate: 3.1,
       yawFromBank: 2.1,
       angularDamping: 3.2,
-      liftCoeff: 0.0105,
+      liftCoeff: 0.0027,
       gravity: 9.8,
       dragCoeff: 0.010,
       thrust: 92
@@ -175,14 +222,8 @@
     const speedEl = document.getElementById('speed');
     const altitudeEl = document.getElementById('altitude');
 
-    window.addEventListener('keydown', (event) => {
-      keyState.add(event.key.toLowerCase());
-    });
-
-    window.addEventListener('keyup', (event) => {
-      keyState.delete(event.key.toLowerCase());
-    });
-
+    window.addEventListener('keydown', (event) => keyState.add(event.key.toLowerCase()));
+    window.addEventListener('keyup', (event) => keyState.delete(event.key.toLowerCase()));
     window.addEventListener('resize', () => {
       camera.aspect = window.innerWidth / window.innerHeight;
       camera.updateProjectionMatrix();
@@ -192,14 +233,10 @@
     const clock = new THREE.Clock();
 
     function updateFlight(dt) {
-      // WASD only: W/S = elevator (pitch), A/D = aileron (roll).
       const pitchInput = (keyState.has('w') ? 1 : 0) - (keyState.has('s') ? 1 : 0);
-      // Positive roll is right-wing-down bank in this coordinate setup.
       const rollInput = (keyState.has('d') ? 1 : 0) - (keyState.has('a') ? 1 : 0);
-
       const controlAuthority = THREE.MathUtils.clamp((flight.speed - flight.stallSpeed) / 26, 0.3, 1.35);
 
-      // Input acceleration into angular velocity.
       flight.pitchVel += pitchInput * flight.pitchRate * controlAuthority * dt;
       flight.rollVel += rollInput * flight.rollRate * controlAuthority * dt;
 
@@ -207,18 +244,14 @@
       const pitchAngle = plane.rotation.z;
       const speedFactor = THREE.MathUtils.clamp(flight.speed / flight.cruiseSpeed, 0.45, 1.7);
 
-      // Roll stability: aircraft tends to level wings when stick is neutral.
-      const autoLevelStrength = 1.0;
-      const rollDampingFromBank = 0.75;
-      flight.rollVel += (-bank * autoLevelStrength - flight.rollVel * rollDampingFromBank) * dt;
+      // Damp roll and auto-level slightly.
+      flight.rollVel += (-bank * 1.0 - flight.rollVel * 0.75) * dt;
 
-      // Extra pitch damping near limits prevents glitchy oscillation and snapping.
-      const pitchLimit = 1.02;
+      // Pitch anti-oscillation near limits.
+      const pitchLimit = 1.0;
       const nearPitchLimit = THREE.MathUtils.clamp(Math.abs(pitchAngle) / pitchLimit, 0, 1);
-      const pitchSpring = -Math.sign(pitchAngle) * nearPitchLimit * nearPitchLimit * 2.8;
-      flight.pitchVel += pitchSpring * dt;
+      flight.pitchVel += -Math.sign(pitchAngle) * nearPitchLimit * nearPitchLimit * 2.8 * dt;
 
-      // Coordinated-turn behavior: bank drives yaw; slight pitch-up increases turn bite.
       const pitchFactor = 1 + Math.max(0, pitchAngle) * 0.18;
       flight.yawVel += -Math.sin(bank) * flight.yawFromBank * speedFactor * pitchFactor * dt;
 
@@ -228,61 +261,55 @@
       flight.rollVel *= baseDamping;
       flight.yawVel *= Math.exp(-(flight.angularDamping + 0.9) * dt);
 
-      // Plane forward axis is X, so pitch rotates around Z and roll rotates around X.
       plane.rotateZ(flight.pitchVel * dt);
       plane.rotateX(flight.rollVel * dt);
       plane.rotateY(flight.yawVel * dt);
 
-      plane.rotation.z = THREE.MathUtils.clamp(plane.rotation.z, -1.02, 1.02);
+      plane.rotation.z = THREE.MathUtils.clamp(plane.rotation.z, -1.0, 1.0);
       plane.rotation.x = THREE.MathUtils.clamp(plane.rotation.x, -1.3, 1.3);
 
       const forward = new THREE.Vector3(1, 0, 0).applyQuaternion(plane.quaternion);
-
       const drag = flight.dragCoeff * flight.speed * flight.speed;
       const afterburnerBias = keyState.has('shift') ? 35 : 0;
       const climbPenalty = Math.max(0, forward.y) * 26;
       flight.speed += (flight.thrust + afterburnerBias - drag - climbPenalty) * dt;
       flight.speed = THREE.MathUtils.clamp(flight.speed, flight.minSpeed, flight.maxSpeed);
 
+      // Balanced vertical model: no passive infinite climb at neutral pitch.
       const bankLiftLoss = Math.max(0.2, Math.cos(bank));
-      const pitchLiftBoost = 1 + Math.max(0, pitchAngle) * 0.15;
-      const lift = flight.liftCoeff * flight.speed * flight.speed * bankLiftLoss * pitchLiftBoost;
-      const stallSink = Math.max(0, (flight.stallSpeed - flight.speed) * 1.25);
-      const targetVerticalSpeed = (lift - flight.gravity - stallSink) * 0.75;
-      flight.verticalSpeed = THREE.MathUtils.lerp(flight.verticalSpeed, targetVerticalSpeed, 1 - Math.exp(-4.6 * dt));
+      const lift = flight.liftCoeff * flight.speed * flight.speed * bankLiftLoss;
+      const stallSink = Math.max(0, (flight.stallSpeed - flight.speed) * 1.4);
+      const verticalAccel = (lift - flight.gravity - stallSink) + forward.y * flight.speed * 0.18;
+      flight.verticalSpeed = THREE.MathUtils.lerp(flight.verticalSpeed, verticalAccel, 1 - Math.exp(-3.5 * dt));
 
       flight.velocity.lerp(forward.multiplyScalar(flight.speed), 1 - Math.exp(-10 * dt));
       flight.velocity.y = flight.verticalSpeed;
       plane.position.addScaledVector(flight.velocity, dt);
 
-      // Soft floor so the player cannot clip through terrain.
-      if (plane.position.y < 3.5) {
-        plane.position.y = 3.5;
-        flight.verticalSpeed = Math.max(0, flight.verticalSpeed * 0.25);
-        plane.rotation.z = THREE.MathUtils.lerp(plane.rotation.z, -0.03, 0.15);
+      const floorHeight = terrainHeightAt(plane.position.x, plane.position.z) + 4;
+      if (plane.position.y < floorHeight) {
+        plane.position.y = floorHeight;
+        flight.verticalSpeed = Math.max(0, flight.verticalSpeed * 0.2);
+        plane.rotation.z = THREE.MathUtils.lerp(plane.rotation.z, -0.02, 0.15);
       }
 
-      // Keep world feeling endless by wrapping objects.
       markerGroup.children.forEach((tree) => {
-        if (tree.position.distanceTo(plane.position) > 950) {
-          tree.position.set(
-            plane.position.x + (Math.random() - 0.5) * 1500,
-            3,
-            plane.position.z + (Math.random() - 0.5) * 1500
-          );
+        if (tree.position.distanceTo(plane.position) > 1100) {
+          const x = plane.position.x + (Math.random() - 0.5) * 1700;
+          const z = plane.position.z + (Math.random() - 0.5) * 1700;
+          placeMarker(tree, x, z);
         }
       });
 
       speedEl.textContent = flight.speed.toFixed(0);
-      altitudeEl.textContent = plane.position.y.toFixed(0);
+      altitudeEl.textContent = Math.max(0, plane.position.y - terrainHeightAt(plane.position.x, plane.position.z)).toFixed(0);
     }
 
     function updateCamera(dt) {
-      const chaseOffset = new THREE.Vector3(-17, 7, 0).applyQuaternion(plane.quaternion);
+      const chaseOffset = new THREE.Vector3(-19, 8.5, 0).applyQuaternion(plane.quaternion);
       const targetPos = plane.position.clone().add(chaseOffset);
-      camera.position.lerp(targetPos, 1 - Math.exp(-5 * dt));
-
-      const lookTarget = plane.position.clone().add(new THREE.Vector3(9, 1.5, 0).applyQuaternion(plane.quaternion));
+      camera.position.lerp(targetPos, 1 - Math.exp(-5.2 * dt));
+      const lookTarget = plane.position.clone().add(new THREE.Vector3(10, 1.8, 0).applyQuaternion(plane.quaternion));
       camera.lookAt(lookTarget);
     }
 

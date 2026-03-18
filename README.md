@@ -1,6 +1,6 @@
 # Sky Glide 3D
 
-A tiny browser game where you fly a stylized 3D plane in an endless sky.
+A tiny browser game where you fly a stylized 3D plane over unique procedural terrain.
 
 ## I don't have the repo yet — how do I run it?
 
@@ -25,8 +25,5 @@ Then open: <http://localhost:8000>
 
 - **W / S**: pitch up/down (elevator)
 - **A / D**: roll left/right (ailerons)
-<<<<<<< codex/create-3d-plane-flying-browser-game-8t3qn4
 - **Shift**: afterburner burst for fighter-jet-style acceleration
-=======
->>>>>>> main
 - Turns are coordinated by your bank angle for a more realistic feel
