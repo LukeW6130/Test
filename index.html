@@ -402,12 +402,20 @@
     const lookTargetVec = new THREE.Vector3();
 
     function updateRenderOrigin(dt) {
+      const previousTargetX = renderOriginTarget.x;
+      const previousTargetZ = renderOriginTarget.z;
+
       if (
         Math.abs(planeWorld.x - renderOriginTarget.x) > floatingOriginThreshold
         || Math.abs(planeWorld.z - renderOriginTarget.z) > floatingOriginThreshold
       ) {
         renderOriginTarget.x = planeWorld.x;
         renderOriginTarget.z = planeWorld.z;
+
+        const shiftX = renderOriginTarget.x - previousTargetX;
+        const shiftZ = renderOriginTarget.z - previousTargetZ;
+        camera.position.x -= shiftX;
+        camera.position.z -= shiftZ;
       }
 
       const blend = 1 - Math.exp(-6 * dt);
@@ -420,9 +428,9 @@
 
     function syncRenderedWorld() {
       planeYaw.position.set(
-        planeWorld.x - renderOrigin.x,
+        planeWorld.x - renderOriginTarget.x,
         planeWorld.y,
-        planeWorld.z - renderOrigin.z
+        planeWorld.z - renderOriginTarget.z
       );
       syncChunkRenderPositions();
       syncMarkerRenderPositions();
@@ -527,7 +535,11 @@
       chaseOffsetVec.set(-19, 8.5, 0).applyQuaternion(planeWorldQuat);
       targetPosVec.copy(planeYaw.position).add(chaseOffsetVec);
       camera.position.lerp(targetPosVec, 1 - Math.exp(-5.2 * dt));
-      lookTargetVec.set(10, 1.8, 0).applyQuaternion(planeWorldQuat).add(planeYaw.position);
+
+      lookTargetVec
+        .set(10, 1.8, 0)
+        .applyQuaternion(planeWorldQuat)
+        .add(planeYaw.position);
       camera.lookAt(lookTargetVec);
     }
 
