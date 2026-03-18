@@ -114,21 +114,10 @@
 
     const terrainSize = 2600;
     const terrainSegments = 220;
+    const terrainTileStep = 140;
     const terrainGeo = new THREE.PlaneGeometry(terrainSize, terrainSize, terrainSegments, terrainSegments);
-    const pos = terrainGeo.attributes.position;
-    const colors = [];
-    for (let i = 0; i < pos.count; i += 1) {
-      const x = pos.getX(i);
-      const z = pos.getY(i);
-      const h = terrainHeightAt(x, z);
-      pos.setZ(i, h);
-
-      const t = THREE.MathUtils.clamp((h + 20) / 90, 0, 1);
-      const col = new THREE.Color().setRGB(0.13 + t * 0.22, 0.34 + t * 0.34, 0.14 + t * 0.18);
-      colors.push(col.r, col.g, col.b);
-    }
-    terrainGeo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-    terrainGeo.computeVertexNormals();
+    const terrainColors = new Float32Array((terrainSegments + 1) * (terrainSegments + 1) * 3);
+    terrainGeo.setAttribute('color', new THREE.Float32BufferAttribute(terrainColors, 3));
 
     const ground = new THREE.Mesh(
       terrainGeo,
@@ -137,6 +126,33 @@
     ground.rotation.x = -Math.PI / 2;
     ground.receiveShadow = true;
     scene.add(ground);
+
+    let terrainCenterX = Number.NaN;
+    let terrainCenterZ = Number.NaN;
+
+    function updateTerrain(centerX, centerZ) {
+      terrainCenterX = Math.round(centerX / terrainTileStep) * terrainTileStep;
+      terrainCenterZ = Math.round(centerZ / terrainTileStep) * terrainTileStep;
+
+      const pos = terrainGeo.attributes.position;
+      const color = terrainGeo.attributes.color;
+      for (let i = 0; i < pos.count; i += 1) {
+        const localX = pos.getX(i);
+        const localZ = pos.getY(i);
+        const worldX = localX + terrainCenterX;
+        const worldZ = localZ + terrainCenterZ;
+        const h = terrainHeightAt(worldX, worldZ);
+        pos.setZ(i, h);
+
+        const t = THREE.MathUtils.clamp((h + 20) / 90, 0, 1);
+        color.setXYZ(i, 0.13 + t * 0.22, 0.34 + t * 0.34, 0.14 + t * 0.18);
+      }
+
+      pos.needsUpdate = true;
+      color.needsUpdate = true;
+      terrainGeo.computeVertexNormals();
+      ground.position.set(terrainCenterX, 0, terrainCenterZ);
+    }
 
     // Terrain markers (stylized trees) follow terrain elevation.
     const markerGroup = new THREE.Group();
@@ -158,8 +174,15 @@
       markerGroup.add(tree);
     }
 
-    // Plane model.
+    // Plane rig uses separate yaw/roll/pitch nodes to avoid awkward Euler coupling.
+    const planeYaw = new THREE.Group();
+    const planeRoll = new THREE.Group();
+    const planePitch = new THREE.Group();
     const plane = new THREE.Group();
+    planeYaw.add(planeRoll);
+    planeRoll.add(planePitch);
+    planePitch.add(plane);
+
     const body = new THREE.Mesh(
       new THREE.CapsuleGeometry(1.2, 5.5, 8, 14),
       new THREE.MeshStandardMaterial({ color: 0xe7ebf3, metalness: 0.22, roughness: 0.42 })
@@ -193,30 +216,35 @@
     fin.castShadow = true;
     plane.add(fin);
 
-    plane.position.set(0, 55, 0);
-    scene.add(plane);
+    planeYaw.position.set(0, 55, 0);
+    scene.add(planeYaw);
+    updateTerrain(0, 0);
 
-    // Fighter-jet-inspired tuning with corrected vertical balance.
+    // Flight state with explicit angular state and acceleration-based vertical motion.
     const flight = {
       velocity: new THREE.Vector3(55, 0, 0),
       verticalSpeed: 0,
+      verticalAcceleration: 0,
       speed: 55,
       minSpeed: 24,
       cruiseSpeed: 64,
       maxSpeed: 145,
       stallSpeed: 30,
+      pitch: 0,
+      roll: 0,
+      yaw: 0,
       pitchVel: 0,
       rollVel: 0,
       yawVel: 0,
       pitchInputSmoothed: 0,
       rollInputSmoothed: 0,
       yawInputSmoothed: 0,
-      pitchRate: 2.1,
-      rollRate: 2.8,
-      rudderRate: 1.65,
-      yawFromBank: 1.75,
-      angularDamping: 3.4,
-      liftCoeff: 0.0027,
+      pitchRate: 2.05,
+      rollRate: 2.7,
+      rudderRate: 1.6,
+      yawFromBank: 1.6,
+      angularDamping: 3.55,
+      liftCoeff: 0.00245,
       gravity: 9.8,
       dragCoeff: 0.010,
       thrust: 92
@@ -240,6 +268,7 @@
     let markerRefreshTimer = 0;
     const forwardVec = new THREE.Vector3();
     const desiredVelocity = new THREE.Vector3();
+    const planeWorldQuat = new THREE.Quaternion();
 
     function updateFlight(dt) {
       const pitchInput = (keyState.has('w') ? 1 : 0) - (keyState.has('s') ? 1 : 0);
@@ -252,70 +281,73 @@
       flight.rollInputSmoothed = THREE.MathUtils.lerp(flight.rollInputSmoothed, rollInput, inputSmoothing);
       flight.yawInputSmoothed = THREE.MathUtils.lerp(flight.yawInputSmoothed, yawInput, inputSmoothing);
 
-      const controlAuthority = THREE.MathUtils.clamp((flight.speed - flight.stallSpeed) / 26, 0.35, 1.28);
+      const controlAuthority = THREE.MathUtils.clamp((flight.speed - flight.stallSpeed) / 26, 0.38, 1.22);
       flight.pitchVel += flight.pitchInputSmoothed * flight.pitchRate * controlAuthority * dt;
       flight.rollVel += flight.rollInputSmoothed * flight.rollRate * controlAuthority * dt;
       flight.yawVel += flight.yawInputSmoothed * flight.rudderRate * controlAuthority * dt;
 
-      const bank = plane.rotation.x;
-      const pitchAngle = plane.rotation.z;
-      const speedFactor = THREE.MathUtils.clamp(flight.speed / flight.cruiseSpeed, 0.55, 1.6);
+      // Stability and coordinated turn behavior.
+      flight.rollVel += (-flight.roll * 0.78 - flight.rollVel * 1.08) * dt;
+      const nearPitchLimit = THREE.MathUtils.clamp(Math.abs(flight.pitch) / 0.92, 0, 1);
+      flight.pitchVel += -Math.sign(flight.pitch) * nearPitchLimit * nearPitchLimit * 1.9 * dt;
 
-      // Auto-level and damping for smoother wings-level recovery.
-      flight.rollVel += (-bank * 0.85 - flight.rollVel * 1.05) * dt;
+      const speedFactor = THREE.MathUtils.clamp(flight.speed / flight.cruiseSpeed, 0.58, 1.55);
+      const pitchFactor = 1 + Math.max(0, flight.pitch) * 0.1;
+      flight.yawVel += -Math.sin(flight.roll) * flight.yawFromBank * speedFactor * pitchFactor * dt;
 
-      // Pitch anti-oscillation near limits.
-      const pitchLimit = 0.95;
-      const nearPitchLimit = THREE.MathUtils.clamp(Math.abs(pitchAngle) / pitchLimit, 0, 1);
-      flight.pitchVel += -Math.sign(pitchAngle) * nearPitchLimit * nearPitchLimit * 2.1 * dt;
-
-      // Banked turn yaw + rudder allows simultaneous pitch/yaw maneuvers.
-      const pitchFactor = 1 + Math.max(0, pitchAngle) * 0.12;
-      flight.yawVel += -Math.sin(bank) * flight.yawFromBank * speedFactor * pitchFactor * dt;
-
-      // Hard-limit angular rates to avoid bursts and jank.
-      flight.pitchVel = THREE.MathUtils.clamp(flight.pitchVel, -2.4, 2.4);
-      flight.rollVel = THREE.MathUtils.clamp(flight.rollVel, -3.1, 3.1);
-      flight.yawVel = THREE.MathUtils.clamp(flight.yawVel, -2.2, 2.2);
+      flight.pitchVel = THREE.MathUtils.clamp(flight.pitchVel, -2.15, 2.15);
+      flight.rollVel = THREE.MathUtils.clamp(flight.rollVel, -2.8, 2.8);
+      flight.yawVel = THREE.MathUtils.clamp(flight.yawVel, -2.0, 2.0);
 
       const baseDamping = Math.exp(-flight.angularDamping * dt);
-      const pitchDamping = Math.exp(-(flight.angularDamping + nearPitchLimit * 1.7) * dt);
+      const pitchDamping = Math.exp(-(flight.angularDamping + nearPitchLimit * 1.55) * dt);
       flight.pitchVel *= pitchDamping;
       flight.rollVel *= baseDamping;
-      flight.yawVel *= Math.exp(-(flight.angularDamping + 1.15) * dt);
+      flight.yawVel *= Math.exp(-(flight.angularDamping + 1.1) * dt);
 
-      plane.rotateZ(flight.pitchVel * dt);
-      plane.rotateX(flight.rollVel * dt);
-      plane.rotateY(flight.yawVel * dt);
+      flight.pitch = THREE.MathUtils.clamp(flight.pitch + flight.pitchVel * dt, -0.92, 0.92);
+      flight.roll = THREE.MathUtils.clamp(flight.roll + flight.rollVel * dt, -1.15, 1.15);
+      flight.yaw += flight.yawVel * dt;
 
-      plane.rotation.z = THREE.MathUtils.clamp(plane.rotation.z, -0.95, 0.95);
-      plane.rotation.x = THREE.MathUtils.clamp(plane.rotation.x, -1.2, 1.2);
+      planeYaw.rotation.y = flight.yaw;
+      planeRoll.rotation.x = flight.roll;
+      planePitch.rotation.z = flight.pitch;
+      planePitch.getWorldQuaternion(planeWorldQuat);
 
-      const forward = forwardVec.set(1, 0, 0).applyQuaternion(plane.quaternion);
+      const forward = forwardVec.set(1, 0, 0).applyQuaternion(planeWorldQuat).normalize();
       const drag = flight.dragCoeff * flight.speed * flight.speed;
       const afterburnerBias = keyState.has('shift') ? 35 : 0;
-      const climbPenalty = Math.max(0, forward.y) * 26;
+      const climbPenalty = Math.max(0, forward.y) * 24;
       flight.speed += (flight.thrust + afterburnerBias - drag - climbPenalty) * dt;
       flight.speed = THREE.MathUtils.clamp(flight.speed, flight.minSpeed, flight.maxSpeed);
 
-      const bankLiftLoss = Math.max(0.2, Math.cos(bank));
+      const bankLiftLoss = Math.max(0.28, Math.cos(flight.roll));
       const lift = flight.liftCoeff * flight.speed * flight.speed * bankLiftLoss;
-      const stallSink = Math.max(0, (flight.stallSpeed - flight.speed) * 1.35);
-      const verticalAccel = (lift - flight.gravity - stallSink) + forward.y * flight.speed * 0.15;
-
-      const verticalBlend = 1 - Math.exp(-4.8 * dt);
-      flight.verticalSpeed = THREE.MathUtils.lerp(flight.verticalSpeed, verticalAccel, verticalBlend);
+      const stallSink = Math.max(0, (flight.stallSpeed - flight.speed) * 1.3);
+      const pitchClimbForce = forward.y * flight.speed * 0.14;
+      flight.verticalAcceleration = lift - flight.gravity - stallSink + pitchClimbForce;
+      flight.verticalSpeed += flight.verticalAcceleration * dt;
+      flight.verticalSpeed *= Math.exp(-1.35 * dt);
+      flight.verticalSpeed = THREE.MathUtils.clamp(flight.verticalSpeed, -55, 55);
 
       desiredVelocity.copy(forward).multiplyScalar(flight.speed);
-      flight.velocity.lerp(desiredVelocity, 1 - Math.exp(-9.5 * dt));
-      flight.velocity.y = flight.verticalSpeed;
-      plane.position.addScaledVector(flight.velocity, dt);
+      desiredVelocity.y += flight.verticalSpeed;
+      flight.velocity.lerp(desiredVelocity, 1 - Math.exp(-8.2 * dt));
+      planeYaw.position.addScaledVector(flight.velocity, dt);
 
-      const floorHeight = terrainHeightAt(plane.position.x, plane.position.z) + 4;
-      if (plane.position.y < floorHeight) {
-        plane.position.y = floorHeight;
-        flight.verticalSpeed = Math.max(0, flight.verticalSpeed * 0.2);
-        plane.rotation.z = THREE.MathUtils.lerp(plane.rotation.z, -0.02, 0.15);
+      const floorHeight = terrainHeightAt(planeYaw.position.x, planeYaw.position.z) + 4;
+      if (planeYaw.position.y < floorHeight) {
+        planeYaw.position.y = floorHeight;
+        flight.verticalSpeed = Math.max(0, flight.verticalSpeed * 0.15);
+        flight.pitch *= 0.96;
+      }
+
+      if (
+        !Number.isFinite(terrainCenterX)
+        || Math.abs(planeYaw.position.x - terrainCenterX) > terrainTileStep
+        || Math.abs(planeYaw.position.z - terrainCenterZ) > terrainTileStep
+      ) {
+        updateTerrain(planeYaw.position.x, planeYaw.position.z);
       }
 
       markerRefreshTimer += dt;
@@ -323,23 +355,23 @@
         markerRefreshTimer = 0;
         const resetDistanceSq = 1100 * 1100;
         markerGroup.children.forEach((tree) => {
-          if (tree.position.distanceToSquared(plane.position) > resetDistanceSq) {
-            const x = plane.position.x + (Math.random() - 0.5) * 1700;
-            const z = plane.position.z + (Math.random() - 0.5) * 1700;
+          if (tree.position.distanceToSquared(planeYaw.position) > resetDistanceSq) {
+            const x = planeYaw.position.x + (Math.random() - 0.5) * 1700;
+            const z = planeYaw.position.z + (Math.random() - 0.5) * 1700;
             placeMarker(tree, x, z);
           }
         });
       }
 
       speedEl.textContent = flight.speed.toFixed(0);
-      altitudeEl.textContent = Math.max(0, plane.position.y - terrainHeightAt(plane.position.x, plane.position.z)).toFixed(0);
+      altitudeEl.textContent = Math.max(0, planeYaw.position.y - terrainHeightAt(planeYaw.position.x, planeYaw.position.z)).toFixed(0);
     }
 
     function updateCamera(dt) {
-      const chaseOffset = new THREE.Vector3(-19, 8.5, 0).applyQuaternion(plane.quaternion);
-      const targetPos = plane.position.clone().add(chaseOffset);
+      const chaseOffset = new THREE.Vector3(-19, 8.5, 0).applyQuaternion(planeWorldQuat);
+      const targetPos = planeYaw.position.clone().add(chaseOffset);
       camera.position.lerp(targetPos, 1 - Math.exp(-5.2 * dt));
-      const lookTarget = plane.position.clone().add(new THREE.Vector3(10, 1.8, 0).applyQuaternion(plane.quaternion));
+      const lookTarget = planeYaw.position.clone().add(new THREE.Vector3(10, 1.8, 0).applyQuaternion(planeWorldQuat));
       camera.lookAt(lookTarget);
     }
 

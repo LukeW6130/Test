@@ -19,6 +19,8 @@ python3 -m http.server 8000
 
 Then open: <http://localhost:8000>
 
+> Open the game through `http://localhost:8000` rather than `file://...`; the ES module import for Three.js is intended to be served from a local web server.
+
 > If your folder name is different, use `cd <your-folder-name>` instead of `cd Test`.
 
 ## Controls
