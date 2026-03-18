@@ -208,10 +208,12 @@
       pitchVel: 0,
       rollVel: 0,
       yawVel: 0,
-      pitchRate: 2.3,
-      rollRate: 3.1,
-      yawFromBank: 2.1,
-      angularDamping: 3.2,
+      pitchInputSmoothed: 0,
+      rollInputSmoothed: 0,
+      pitchRate: 2.15,
+      rollRate: 2.9,
+      yawFromBank: 1.9,
+      angularDamping: 3.35,
       liftCoeff: 0.0027,
       gravity: 9.8,
       dragCoeff: 0.010,
@@ -231,42 +233,49 @@
     });
 
     const clock = new THREE.Clock();
+    const fixedStep = 1 / 120;
+    let accumulator = 0;
 
     function updateFlight(dt) {
       const pitchInput = (keyState.has('w') ? 1 : 0) - (keyState.has('s') ? 1 : 0);
       const rollInput = (keyState.has('d') ? 1 : 0) - (keyState.has('a') ? 1 : 0);
-      const controlAuthority = THREE.MathUtils.clamp((flight.speed - flight.stallSpeed) / 26, 0.3, 1.35);
 
-      flight.pitchVel += pitchInput * flight.pitchRate * controlAuthority * dt;
-      flight.rollVel += rollInput * flight.rollRate * controlAuthority * dt;
+      // Smooth control inputs to remove jitter and key-tap harshness.
+      const inputSmoothing = 1 - Math.exp(-12 * dt);
+      flight.pitchInputSmoothed = THREE.MathUtils.lerp(flight.pitchInputSmoothed, pitchInput, inputSmoothing);
+      flight.rollInputSmoothed = THREE.MathUtils.lerp(flight.rollInputSmoothed, rollInput, inputSmoothing);
+
+      const controlAuthority = THREE.MathUtils.clamp((flight.speed - flight.stallSpeed) / 26, 0.32, 1.3);
+      flight.pitchVel += flight.pitchInputSmoothed * flight.pitchRate * controlAuthority * dt;
+      flight.rollVel += flight.rollInputSmoothed * flight.rollRate * controlAuthority * dt;
 
       const bank = plane.rotation.x;
       const pitchAngle = plane.rotation.z;
-      const speedFactor = THREE.MathUtils.clamp(flight.speed / flight.cruiseSpeed, 0.45, 1.7);
+      const speedFactor = THREE.MathUtils.clamp(flight.speed / flight.cruiseSpeed, 0.5, 1.65);
 
-      // Damp roll and auto-level slightly.
-      flight.rollVel += (-bank * 1.0 - flight.rollVel * 0.75) * dt;
+      // Auto-level and damping for smoother wings-level recovery.
+      flight.rollVel += (-bank * 0.9 - flight.rollVel * 0.95) * dt;
 
       // Pitch anti-oscillation near limits.
-      const pitchLimit = 1.0;
+      const pitchLimit = 0.98;
       const nearPitchLimit = THREE.MathUtils.clamp(Math.abs(pitchAngle) / pitchLimit, 0, 1);
-      flight.pitchVel += -Math.sign(pitchAngle) * nearPitchLimit * nearPitchLimit * 2.8 * dt;
+      flight.pitchVel += -Math.sign(pitchAngle) * nearPitchLimit * nearPitchLimit * 2.4 * dt;
 
-      const pitchFactor = 1 + Math.max(0, pitchAngle) * 0.18;
+      const pitchFactor = 1 + Math.max(0, pitchAngle) * 0.14;
       flight.yawVel += -Math.sin(bank) * flight.yawFromBank * speedFactor * pitchFactor * dt;
 
       const baseDamping = Math.exp(-flight.angularDamping * dt);
-      const pitchDamping = Math.exp(-(flight.angularDamping + nearPitchLimit * 2.2) * dt);
+      const pitchDamping = Math.exp(-(flight.angularDamping + nearPitchLimit * 1.9) * dt);
       flight.pitchVel *= pitchDamping;
       flight.rollVel *= baseDamping;
-      flight.yawVel *= Math.exp(-(flight.angularDamping + 0.9) * dt);
+      flight.yawVel *= Math.exp(-(flight.angularDamping + 1.1) * dt);
 
       plane.rotateZ(flight.pitchVel * dt);
       plane.rotateX(flight.rollVel * dt);
       plane.rotateY(flight.yawVel * dt);
 
-      plane.rotation.z = THREE.MathUtils.clamp(plane.rotation.z, -1.0, 1.0);
-      plane.rotation.x = THREE.MathUtils.clamp(plane.rotation.x, -1.3, 1.3);
+      plane.rotation.z = THREE.MathUtils.clamp(plane.rotation.z, -0.98, 0.98);
+      plane.rotation.x = THREE.MathUtils.clamp(plane.rotation.x, -1.22, 1.22);
 
       const forward = new THREE.Vector3(1, 0, 0).applyQuaternion(plane.quaternion);
       const drag = flight.dragCoeff * flight.speed * flight.speed;
@@ -275,14 +284,16 @@
       flight.speed += (flight.thrust + afterburnerBias - drag - climbPenalty) * dt;
       flight.speed = THREE.MathUtils.clamp(flight.speed, flight.minSpeed, flight.maxSpeed);
 
-      // Balanced vertical model: no passive infinite climb at neutral pitch.
       const bankLiftLoss = Math.max(0.2, Math.cos(bank));
       const lift = flight.liftCoeff * flight.speed * flight.speed * bankLiftLoss;
       const stallSink = Math.max(0, (flight.stallSpeed - flight.speed) * 1.4);
-      const verticalAccel = (lift - flight.gravity - stallSink) + forward.y * flight.speed * 0.18;
-      flight.verticalSpeed = THREE.MathUtils.lerp(flight.verticalSpeed, verticalAccel, 1 - Math.exp(-3.5 * dt));
+      const verticalAccel = (lift - flight.gravity - stallSink) + forward.y * flight.speed * 0.16;
 
-      flight.velocity.lerp(forward.multiplyScalar(flight.speed), 1 - Math.exp(-10 * dt));
+      // Smooth vertical acceleration integration to avoid bobbing.
+      const verticalBlend = 1 - Math.exp(-4.2 * dt);
+      flight.verticalSpeed = THREE.MathUtils.lerp(flight.verticalSpeed, verticalAccel, verticalBlend);
+
+      flight.velocity.lerp(forward.multiplyScalar(flight.speed), 1 - Math.exp(-9.5 * dt));
       flight.velocity.y = flight.verticalSpeed;
       plane.position.addScaledVector(flight.velocity, dt);
 
@@ -314,8 +325,14 @@
     }
 
     function animate() {
-      const dt = Math.min(clock.getDelta(), 0.032);
-      updateFlight(dt);
+      const dt = Math.min(clock.getDelta(), 0.05);
+      accumulator += dt;
+
+      while (accumulator >= fixedStep) {
+        updateFlight(fixedStep);
+        accumulator -= fixedStep;
+      }
+
       updateCamera(dt);
       renderer.render(scene, camera);
       requestAnimationFrame(animate);
