@@ -10,7 +10,7 @@
       width: 100%;
       height: 100%;
       overflow: hidden;
-      background: linear-gradient(#8bd3ff, #dff4ff);
+      background: linear-gradient(180deg, #4b79b8 0%, #89b8ee 35%, #d7ebff 72%, #f6fbff 100%);
       font-family: Arial, Helvetica, sans-serif;
       color: #0a2740;
     }
@@ -47,7 +47,7 @@
     import * as THREE from 'https://unpkg.com/three@0.161.0/build/three.module.js';
 
     const scene = new THREE.Scene();
-    scene.fog = new THREE.Fog(0xbde8ff, 130, 700);
+    scene.fog = new THREE.Fog(0xcfe2ff, 240, 1500);
 
     const camera = new THREE.PerspectiveCamera(68, window.innerWidth / window.innerHeight, 0.1, 2400);
     const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -56,9 +56,9 @@
     renderer.shadowMap.enabled = true;
     document.body.appendChild(renderer.domElement);
 
-    scene.add(new THREE.HemisphereLight(0xffffff, 0x355c7d, 1.25));
-    const sun = new THREE.DirectionalLight(0xffffff, 1.15);
-    sun.position.set(120, 220, 80);
+    scene.add(new THREE.HemisphereLight(0xd7e8ff, 0x38536d, 1.35));
+    const sun = new THREE.DirectionalLight(0xfff1d6, 1.35);
+    sun.position.set(160, 240, 120);
     sun.castShadow = true;
     sun.shadow.mapSize.set(1024, 1024);
     sun.shadow.camera.near = 20;
@@ -68,6 +68,50 @@
     sun.shadow.camera.top = 420;
     sun.shadow.camera.bottom = -420;
     scene.add(sun);
+
+    const fillLight = new THREE.DirectionalLight(0xbfd7ff, 0.28);
+    fillLight.position.set(-180, 90, -120);
+    scene.add(fillLight);
+
+    const skyGeo = new THREE.SphereGeometry(2200, 32, 18);
+    const skyMat = new THREE.ShaderMaterial({
+      side: THREE.BackSide,
+      depthWrite: false,
+      uniforms: {
+        topColor: { value: new THREE.Color(0x2d5f9a) },
+        horizonColor: { value: new THREE.Color(0xbfdcff) },
+        bottomColor: { value: new THREE.Color(0xf9fdff) },
+        offset: { value: 40 },
+        exponent: { value: 0.7 }
+      },
+      vertexShader: `
+        varying vec3 vWorldPosition;
+        void main() {
+          vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+          vWorldPosition = worldPosition.xyz;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform vec3 topColor;
+        uniform vec3 horizonColor;
+        uniform vec3 bottomColor;
+        uniform float offset;
+        uniform float exponent;
+        varying vec3 vWorldPosition;
+
+        void main() {
+          float h = normalize(vWorldPosition + vec3(0.0, offset, 0.0)).y;
+          float topMix = max(pow(max(h, 0.0), exponent), 0.0);
+          float bottomMix = max(pow(max(-h, 0.0), exponent * 1.2), 0.0);
+          vec3 color = mix(horizonColor, topColor, topMix);
+          color = mix(color, bottomColor, bottomMix * 0.85);
+          gl_FragColor = vec4(color, 1.0);
+        }
+      `
+    });
+    const skyDome = new THREE.Mesh(skyGeo, skyMat);
+    scene.add(skyDome);
 
     // --- Procedural terrain -------------------------------------------------
     function hash2(x, z) {
@@ -115,7 +159,7 @@
     const CHUNK_SIZE = 400;
     const CHUNK_SEGMENTS = 80;
     const CHUNK_WORLD_SIZE = CHUNK_SIZE;
-    const RENDER_DISTANCE = 1;
+    const RENDER_DISTANCE = 2;
 
     const chunks = new Map();
     const worldOrigin = new THREE.Vector3();
@@ -215,7 +259,10 @@
       tree.position.set(x - worldOrigin.x, terrainY + 5, z - worldOrigin.z);
     }
 
-    for (let i = 0; i < 220; i += 1) {
+    const markerResetDistance = CHUNK_WORLD_SIZE * (RENDER_DISTANCE + 1.75);
+    const markerResetDistanceSq = markerResetDistance * markerResetDistance;
+
+    for (let i = 0; i < 360; i += 1) {
       const tree = new THREE.Mesh(markerGeo, markerMat);
       const x = (Math.random() - 0.5) * 2100;
       const z = (Math.random() - 0.5) * 2100;
@@ -436,11 +483,10 @@
       markerRefreshTimer += dt;
       if (markerRefreshTimer >= 0.08) {
         markerRefreshTimer = 0;
-        const resetDistanceSq = 1100 * 1100;
         markerGroup.children.forEach((tree) => {
           const dx = tree.userData.worldX - planeWorldX;
           const dz = tree.userData.worldZ - planeWorldZ;
-          if (dx * dx + dz * dz > resetDistanceSq) {
+          if (dx * dx + dz * dz > markerResetDistanceSq) {
             const x = planeWorldX + (Math.random() - 0.5) * 1700;
             const z = planeWorldZ + (Math.random() - 0.5) * 1700;
             placeMarker(tree, x, z);
