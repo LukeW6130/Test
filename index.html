@@ -113,7 +113,7 @@
     }
 
     const terrainSize = 2600;
-    const terrainSegments = 220;
+    const terrainSegments = 160;
     const terrainTileStep = 140;
     const terrainGeo = new THREE.PlaneGeometry(terrainSize, terrainSize, terrainSegments, terrainSegments);
     const terrainColors = new Float32Array((terrainSegments + 1) * (terrainSegments + 1) * 3);
@@ -121,7 +121,7 @@
 
     const ground = new THREE.Mesh(
       terrainGeo,
-      new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.96, metalness: 0.03, flatShading: false })
+      new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.96, metalness: 0.03, flatShading: true })
     );
     ground.rotation.x = -Math.PI / 2;
     ground.receiveShadow = true;
@@ -129,6 +129,7 @@
 
     let terrainCenterX = Number.NaN;
     let terrainCenterZ = Number.NaN;
+    let terrainNormalRefreshCountdown = 0;
 
     function updateTerrain(centerX, centerZ) {
       terrainCenterX = Math.round(centerX / terrainTileStep) * terrainTileStep;
@@ -150,7 +151,11 @@
 
       pos.needsUpdate = true;
       color.needsUpdate = true;
-      terrainGeo.computeVertexNormals();
+      terrainNormalRefreshCountdown -= 1;
+      if (terrainNormalRefreshCountdown <= 0) {
+        terrainGeo.computeVertexNormals();
+        terrainNormalRefreshCountdown = 2;
+      }
       ground.position.set(terrainCenterX, 0, terrainCenterZ);
     }
 
@@ -269,6 +274,9 @@
     const forwardVec = new THREE.Vector3();
     const desiredVelocity = new THREE.Vector3();
     const planeWorldQuat = new THREE.Quaternion();
+    const chaseOffsetVec = new THREE.Vector3();
+    const targetPosVec = new THREE.Vector3();
+    const lookTargetVec = new THREE.Vector3();
 
     function updateFlight(dt) {
       const pitchInput = (keyState.has('w') ? 1 : 0) - (keyState.has('s') ? 1 : 0);
@@ -308,6 +316,7 @@
       flight.pitch = THREE.MathUtils.clamp(flight.pitch + flight.pitchVel * dt, -0.92, 0.92);
       flight.roll = THREE.MathUtils.clamp(flight.roll + flight.rollVel * dt, -1.15, 1.15);
       flight.yaw += flight.yawVel * dt;
+      flight.yaw = ((flight.yaw + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
 
       planeYaw.rotation.y = flight.yaw;
       planeRoll.rotation.x = flight.roll;
@@ -331,15 +340,16 @@
       flight.verticalSpeed = THREE.MathUtils.clamp(flight.verticalSpeed, -55, 55);
 
       desiredVelocity.copy(forward).multiplyScalar(flight.speed);
-      desiredVelocity.y += flight.verticalSpeed;
-      flight.velocity.lerp(desiredVelocity, 1 - Math.exp(-8.2 * dt));
+      desiredVelocity.y = flight.verticalSpeed;
+      flight.velocity.copy(desiredVelocity);
       planeYaw.position.addScaledVector(flight.velocity, dt);
 
       const floorHeight = terrainHeightAt(planeYaw.position.x, planeYaw.position.z) + 4;
       if (planeYaw.position.y < floorHeight) {
         planeYaw.position.y = floorHeight;
-        flight.verticalSpeed = Math.max(0, flight.verticalSpeed * 0.15);
+        flight.verticalSpeed = 0;
         flight.pitch *= 0.96;
+        flight.pitchVel *= 0.6;
       }
 
       if (
@@ -368,11 +378,11 @@
     }
 
     function updateCamera(dt) {
-      const chaseOffset = new THREE.Vector3(-19, 8.5, 0).applyQuaternion(planeWorldQuat);
-      const targetPos = planeYaw.position.clone().add(chaseOffset);
-      camera.position.lerp(targetPos, 1 - Math.exp(-5.2 * dt));
-      const lookTarget = planeYaw.position.clone().add(new THREE.Vector3(10, 1.8, 0).applyQuaternion(planeWorldQuat));
-      camera.lookAt(lookTarget);
+      chaseOffsetVec.set(-19, 8.5, 0).applyQuaternion(planeWorldQuat);
+      targetPosVec.copy(planeYaw.position).add(chaseOffsetVec);
+      camera.position.lerp(targetPosVec, 1 - Math.exp(-5.2 * dt));
+      lookTargetVec.set(10, 1.8, 0).applyQuaternion(planeWorldQuat).add(planeYaw.position);
+      camera.lookAt(lookTargetVec);
     }
 
     function animate() {
