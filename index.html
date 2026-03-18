@@ -118,6 +118,8 @@
     const RENDER_DISTANCE = 1;
 
     const chunks = new Map();
+    const worldOrigin = new THREE.Vector3();
+    const floatingOriginThreshold = CHUNK_SIZE * 0.5;
 
     function chunkKey(cx, cz) {
       return `${cx},${cz}`;
@@ -145,7 +147,7 @@
 
       pos.needsUpdate = true;
       color.needsUpdate = true;
-      mesh.position.set(worldOffsetX, 0, worldOffsetZ);
+      mesh.position.set(worldOffsetX - worldOrigin.x, 0, worldOffsetZ - worldOrigin.z);
     }
 
     function createChunk(cx, cz) {
@@ -208,7 +210,9 @@
 
     function placeMarker(tree, x, z) {
       const terrainY = terrainHeightAt(x, z);
-      tree.position.set(x, terrainY + 5, z);
+      tree.userData.worldX = x;
+      tree.userData.worldZ = z;
+      tree.position.set(x - worldOrigin.x, terrainY + 5, z - worldOrigin.z);
     }
 
     for (let i = 0; i < 220; i += 1) {
@@ -265,6 +269,30 @@
     planeYaw.position.set(0, 55, 0);
     scene.add(planeYaw);
     updateChunks(planeYaw.position.x, planeYaw.position.z);
+
+    function rebaseWorld(shiftX, shiftZ) {
+      if (shiftX === 0 && shiftZ === 0) {
+        return;
+      }
+
+      worldOrigin.x += shiftX;
+      worldOrigin.z += shiftZ;
+
+      planeYaw.position.x -= shiftX;
+      planeYaw.position.z -= shiftZ;
+      camera.position.x -= shiftX;
+      camera.position.z -= shiftZ;
+
+      for (const chunk of chunks.values()) {
+        chunk.mesh.position.x -= shiftX;
+        chunk.mesh.position.z -= shiftZ;
+      }
+
+      markerGroup.children.forEach((tree) => {
+        tree.position.x -= shiftX;
+        tree.position.z -= shiftZ;
+      });
+    }
 
     // Flight state with explicit angular state and acceleration-based vertical motion.
     const flight = {
@@ -386,7 +414,9 @@
       flight.velocity.copy(desiredVelocity);
       planeYaw.position.addScaledVector(flight.velocity, dt);
 
-      const floorHeight = terrainHeightAt(planeYaw.position.x, planeYaw.position.z) + 4;
+      const planeWorldX = worldOrigin.x + planeYaw.position.x;
+      const planeWorldZ = worldOrigin.z + planeYaw.position.z;
+      const floorHeight = terrainHeightAt(planeWorldX, planeWorldZ) + 4;
       if (planeYaw.position.y < floorHeight) {
         planeYaw.position.y = floorHeight;
         flight.verticalSpeed = 0;
@@ -394,23 +424,32 @@
         flight.pitchVel *= 0.6;
       }
 
-      updateChunks(planeYaw.position.x, planeYaw.position.z);
+      if (
+        Math.abs(planeYaw.position.x) > floatingOriginThreshold
+        || Math.abs(planeYaw.position.z) > floatingOriginThreshold
+      ) {
+        rebaseWorld(planeYaw.position.x, planeYaw.position.z);
+      }
+
+      updateChunks(planeWorldX, planeWorldZ);
 
       markerRefreshTimer += dt;
       if (markerRefreshTimer >= 0.08) {
         markerRefreshTimer = 0;
         const resetDistanceSq = 1100 * 1100;
         markerGroup.children.forEach((tree) => {
-          if (tree.position.distanceToSquared(planeYaw.position) > resetDistanceSq) {
-            const x = planeYaw.position.x + (Math.random() - 0.5) * 1700;
-            const z = planeYaw.position.z + (Math.random() - 0.5) * 1700;
+          const dx = tree.userData.worldX - planeWorldX;
+          const dz = tree.userData.worldZ - planeWorldZ;
+          if (dx * dx + dz * dz > resetDistanceSq) {
+            const x = planeWorldX + (Math.random() - 0.5) * 1700;
+            const z = planeWorldZ + (Math.random() - 0.5) * 1700;
             placeMarker(tree, x, z);
           }
         });
       }
 
       speedEl.textContent = flight.speed.toFixed(0);
-      altitudeEl.textContent = Math.max(0, planeYaw.position.y - terrainHeightAt(planeYaw.position.x, planeYaw.position.z)).toFixed(0);
+      altitudeEl.textContent = Math.max(0, planeYaw.position.y - terrainHeightAt(planeWorldX, planeWorldZ)).toFixed(0);
     }
 
     function updateCamera(dt) {
