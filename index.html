@@ -531,8 +531,7 @@
       lookTargetVec
         .set(10, 1.8, 0)
         .applyQuaternion(planeWorldQuat)
-        .add(planeWorld)
-        .sub(renderOrigin);
+        .add(planeYaw.position);
 
       camera.lookAt(lookTargetVec);
     }
