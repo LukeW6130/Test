@@ -400,10 +400,6 @@
     const chaseOffsetVec = new THREE.Vector3();
     const targetPosVec = new THREE.Vector3();
     const lookTargetVec = new THREE.Vector3();
-    const desiredLookDirVec = new THREE.Vector3();
-    const currentLookDirVec = new THREE.Vector3();
-    const targetCameraQuat = new THREE.Quaternion();
-    const cameraForwardBasis = new THREE.Vector3(0, 0, -1);
 
     function updateRenderOrigin(dt) {
       if (
@@ -528,23 +524,17 @@
     }
 
     function updateCamera(dt) {
-      const positionBlend = 1 - Math.exp(-5.2 * dt);
-      const rotationBlend = 1 - Math.exp(-6.0 * dt);
-
       chaseOffsetVec.set(-19, 8.5, 0).applyQuaternion(planeWorldQuat);
       targetPosVec.copy(planeYaw.position).add(chaseOffsetVec);
-      camera.position.lerp(targetPosVec, positionBlend);
+      camera.position.lerp(targetPosVec, 1 - Math.exp(-5.2 * dt));
 
       lookTargetVec
         .set(10, 1.8, 0)
         .applyQuaternion(planeWorldQuat)
-        .add(planeYaw.position);
+        .add(planeWorld)
+        .sub(renderOrigin);
 
-      desiredLookDirVec.copy(lookTargetVec).sub(camera.position).normalize();
-      currentLookDirVec.copy(cameraForwardBasis).applyQuaternion(camera.quaternion);
-      currentLookDirVec.lerp(desiredLookDirVec, rotationBlend).normalize();
-      targetCameraQuat.setFromUnitVectors(cameraForwardBasis, currentLookDirVec);
-      camera.quaternion.slerp(targetCameraQuat, positionBlend);
+      camera.lookAt(lookTargetVec);
     }
 
     function animate() {
