@@ -178,7 +178,6 @@
 
     const chunks = new Map();
     const renderOrigin = new THREE.Vector3();
-    const renderOriginTarget = new THREE.Vector3();
     const floatingOriginThreshold = CHUNK_SIZE * 0.5;
 
     function chunkKey(cx, cz) {
@@ -345,7 +344,6 @@
     const planeWorld = new THREE.Vector3(0, 55, 0);
     renderOrigin.copy(planeWorld);
     renderOrigin.y = 0;
-    renderOriginTarget.copy(renderOrigin);
     planeYaw.position.set(0, planeWorld.y, 0);
     updateChunks(planeWorld.x, planeWorld.z);
 
@@ -401,21 +399,22 @@
     const targetPosVec = new THREE.Vector3();
     const lookTargetVec = new THREE.Vector3();
 
-    function updateRenderOrigin(dt) {
-      if (
-        Math.abs(planeWorld.x - renderOriginTarget.x) > floatingOriginThreshold
-        || Math.abs(planeWorld.z - renderOriginTarget.z) > floatingOriginThreshold
-      ) {
-        renderOriginTarget.x = planeWorld.x;
-        renderOriginTarget.z = planeWorld.z;
+    function updateRenderOrigin() {
+      const shiftX = Math.abs(planeWorld.x - renderOrigin.x) > floatingOriginThreshold
+        ? planeWorld.x - renderOrigin.x
+        : 0;
+      const shiftZ = Math.abs(planeWorld.z - renderOrigin.z) > floatingOriginThreshold
+        ? planeWorld.z - renderOrigin.z
+        : 0;
+
+      if (shiftX === 0 && shiftZ === 0) {
+        return;
       }
 
-      const blend = 1 - Math.exp(-6 * dt);
-      renderOrigin.lerp(renderOriginTarget, blend);
-      renderOrigin.y = 0;
-      if (renderOrigin.distanceToSquared(renderOriginTarget) < 0.0001) {
-        renderOrigin.copy(renderOriginTarget);
-      }
+      renderOrigin.x += shiftX;
+      renderOrigin.z += shiftZ;
+      camera.position.x -= shiftX;
+      camera.position.z -= shiftZ;
     }
 
     function syncRenderedWorld() {
@@ -501,7 +500,7 @@
         flight.pitchVel *= 0.6;
       }
 
-      updateRenderOrigin(dt);
+      updateRenderOrigin();
       syncRenderedWorld();
       updateChunks(planeWorld.x, planeWorld.z);
 
