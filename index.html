@@ -1,0 +1,563 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sky Glide 3D</title>
+  <style>
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: linear-gradient(180deg, #466d9b 0%, #7fa7db 32%, #d8eaff 72%, #f8fcff 100%);
+      font-family: Arial, Helvetica, sans-serif;
+      color: #0a2740;
+    }
+
+    #hud {
+      position: fixed;
+      top: 12px;
+      left: 12px;
+      z-index: 10;
+      background: rgba(255, 255, 255, 0.75);
+      border: 1px solid rgba(10, 39, 64, 0.2);
+      border-radius: 10px;
+      padding: 10px 12px;
+      backdrop-filter: blur(4px);
+      max-width: min(340px, 72vw);
+    }
+
+    #hud h1 { margin: 0 0 6px; font-size: 1.05rem; }
+    #hud p { margin: 0; line-height: 1.4; font-size: 0.88rem; }
+    #speed, #altitude { font-weight: 700; }
+    canvas { display: block; }
+  </style>
+</head>
+<body>
+  <aside id="hud">
+    <h1>Sky Glide 3D</h1>
+    <p>
+      WASD flight controls: W/S pitch, A/D roll, Q/E yaw. Shift = afterburner boost.<br />
+      Airspeed: <span id="speed">0</span> u/s | Altitude: <span id="altitude">0</span> m
+    </p>
+  </aside>
+
+  <script type="module">
+    import * as THREE from 'https://unpkg.com/three@0.161.0/build/three.module.js';
+
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.Fog(0xd4e5ff, 260, 2200);
+
+    const camera = new THREE.PerspectiveCamera(68, window.innerWidth / window.innerHeight, 0.1, 3200);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    document.body.appendChild(renderer.domElement);
+
+    const hemi = new THREE.HemisphereLight(0xdeebff, 0x35506a, 1.4);
+    scene.add(hemi);
+
+    const sun = new THREE.DirectionalLight(0xffefcf, 1.4);
+    sun.position.set(240, 260, 140);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(1024, 1024);
+    sun.shadow.camera.near = 20;
+    sun.shadow.camera.far = 1400;
+    sun.shadow.camera.left = -520;
+    sun.shadow.camera.right = 520;
+    sun.shadow.camera.top = 520;
+    sun.shadow.camera.bottom = -520;
+    scene.add(sun);
+
+    const fillLight = new THREE.DirectionalLight(0xb7d2ff, 0.32);
+    fillLight.position.set(-220, 120, -140);
+    scene.add(fillLight);
+
+    const skyGeo = new THREE.SphereGeometry(2600, 36, 20);
+    const sunDirection = sun.position.clone().normalize();
+    const skyMat = new THREE.ShaderMaterial({
+      side: THREE.BackSide,
+      depthWrite: false,
+      uniforms: {
+        topColor: { value: new THREE.Color(0x2d5d97) },
+        horizonColor: { value: new THREE.Color(0xc9defd) },
+        bottomColor: { value: new THREE.Color(0xf8fbff) },
+        hazeColor: { value: new THREE.Color(0xf7e6ca) },
+        sunColor: { value: new THREE.Color(0xfff2c9) },
+        sunDirection: { value: sunDirection },
+        offset: { value: 35 },
+        exponent: { value: 0.72 }
+      },
+      vertexShader: `
+        varying vec3 vWorldPosition;
+        void main() {
+          vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+          vWorldPosition = worldPosition.xyz;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform vec3 topColor;
+        uniform vec3 horizonColor;
+        uniform vec3 bottomColor;
+        uniform vec3 hazeColor;
+        uniform vec3 sunColor;
+        uniform vec3 sunDirection;
+        uniform float offset;
+        uniform float exponent;
+        varying vec3 vWorldPosition;
+
+        void main() {
+          vec3 dir = normalize(vWorldPosition + vec3(0.0, offset, 0.0));
+          float h = dir.y;
+          float topMix = max(pow(max(h, 0.0), exponent), 0.0);
+          float bottomMix = max(pow(max(-h, 0.0), exponent * 1.25), 0.0);
+          float hazeBand = smoothstep(-0.08, 0.12, h) * (1.0 - smoothstep(0.12, 0.42, h));
+          float sunGlow = pow(max(dot(dir, normalize(sunDirection)), 0.0), 96.0);
+          float sunHalo = pow(max(dot(dir, normalize(sunDirection)), 0.0), 12.0) * 0.22;
+
+          vec3 color = mix(horizonColor, topColor, topMix);
+          color = mix(color, bottomColor, bottomMix * 0.82);
+          color = mix(color, hazeColor, hazeBand * 0.22 + sunHalo);
+          color += sunColor * sunGlow * 0.95;
+          gl_FragColor = vec4(color, 1.0);
+        }
+      `
+    });
+    const skyDome = new THREE.Mesh(skyGeo, skyMat);
+    scene.add(skyDome);
+
+    function hash2(x, z) {
+      const s = Math.sin(x * 127.1 + z * 311.7) * 43758.5453;
+      return s - Math.floor(s);
+    }
+
+    function valueNoise2(x, z) {
+      const ix = Math.floor(x);
+      const iz = Math.floor(z);
+      const fx = x - ix;
+      const fz = z - iz;
+      const ux = fx * fx * (3 - 2 * fx);
+      const uz = fz * fz * (3 - 2 * fz);
+
+      const a = hash2(ix, iz);
+      const b = hash2(ix + 1, iz);
+      const c = hash2(ix, iz + 1);
+      const d = hash2(ix + 1, iz + 1);
+
+      const nx0 = a + (b - a) * ux;
+      const nx1 = c + (d - c) * ux;
+      return nx0 + (nx1 - nx0) * uz;
+    }
+
+    function fbm2(x, z) {
+      let sum = 0;
+      let amplitude = 0.55;
+      let frequency = 0.003;
+      for (let i = 0; i < 5; i += 1) {
+        sum += (valueNoise2(x * frequency, z * frequency) - 0.5) * 2 * amplitude;
+        amplitude *= 0.52;
+        frequency *= 2.02;
+      }
+      return sum;
+    }
+
+    function terrainHeightAt(x, z) {
+      const ridges = Math.abs(fbm2(x + 1200, z - 700)) * 18;
+      const base = fbm2(x, z) * 42;
+      const hills = Math.sin(x * 0.0022) * Math.cos(z * 0.002) * 14;
+      return -10 + base + ridges + hills;
+    }
+
+    const CHUNK_SIZE = 400;
+    const CHUNK_SEGMENTS = 80;
+    const CHUNK_WORLD_SIZE = CHUNK_SIZE;
+    const RENDER_DISTANCE = 3;
+
+    const chunks = new Map();
+    const renderOrigin = new THREE.Vector3();
+    const renderOriginTarget = new THREE.Vector3();
+    const floatingOriginThreshold = CHUNK_SIZE * 0.5;
+
+    function chunkKey(cx, cz) {
+      return `${cx},${cz}`;
+    }
+
+    function updateChunkGeometry(mesh, cx, cz) {
+      const geo = mesh.geometry;
+      const pos = geo.attributes.position;
+      const color = geo.attributes.color;
+      const worldOffsetX = cx * CHUNK_WORLD_SIZE;
+      const worldOffsetZ = cz * CHUNK_WORLD_SIZE;
+
+      for (let i = 0; i < pos.count; i += 1) {
+        const localX = pos.getX(i);
+        const localZ = pos.getZ(i);
+        const worldX = localX + worldOffsetX;
+        const worldZ = localZ + worldOffsetZ;
+        const h = terrainHeightAt(worldX, worldZ);
+        pos.setY(i, h);
+
+        const t = THREE.MathUtils.clamp((h + 20) / 90, 0, 1);
+        color.setXYZ(i, 0.13 + t * 0.22, 0.34 + t * 0.34, 0.14 + t * 0.18);
+      }
+
+      pos.needsUpdate = true;
+      color.needsUpdate = true;
+      mesh.position.set(worldOffsetX - renderOrigin.x, 0, worldOffsetZ - renderOrigin.z);
+    }
+
+    function createChunk(cx, cz) {
+      const geo = new THREE.PlaneGeometry(CHUNK_SIZE, CHUNK_SIZE, CHUNK_SEGMENTS, CHUNK_SEGMENTS);
+      geo.rotateX(-Math.PI / 2);
+      const colors = new Float32Array((CHUNK_SEGMENTS + 1) * (CHUNK_SEGMENTS + 1) * 3);
+      geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+
+      const mesh = new THREE.Mesh(
+        geo,
+        new THREE.MeshStandardMaterial({
+          vertexColors: true,
+          roughness: 0.96,
+          metalness: 0.03,
+          flatShading: true
+        })
+      );
+      mesh.receiveShadow = true;
+
+      updateChunkGeometry(mesh, cx, cz);
+      scene.add(mesh);
+      return { mesh, cx, cz };
+    }
+
+    function syncChunkRenderPositions() {
+      for (const chunk of chunks.values()) {
+        chunk.mesh.position.set(
+          chunk.cx * CHUNK_WORLD_SIZE - renderOrigin.x,
+          0,
+          chunk.cz * CHUNK_WORLD_SIZE - renderOrigin.z
+        );
+      }
+    }
+
+    function updateChunks(playerX, playerZ) {
+      const centerCX = Math.floor(playerX / CHUNK_WORLD_SIZE);
+      const centerCZ = Math.floor(playerZ / CHUNK_WORLD_SIZE);
+      const needed = new Set();
+
+      for (let x = -RENDER_DISTANCE; x <= RENDER_DISTANCE; x += 1) {
+        for (let z = -RENDER_DISTANCE; z <= RENDER_DISTANCE; z += 1) {
+          const cx = centerCX + x;
+          const cz = centerCZ + z;
+          const key = chunkKey(cx, cz);
+          needed.add(key);
+          if (!chunks.has(key)) {
+            chunks.set(key, createChunk(cx, cz));
+          }
+        }
+      }
+
+      for (const [key, chunk] of chunks) {
+        if (!needed.has(key)) {
+          scene.remove(chunk.mesh);
+          chunk.mesh.geometry.dispose();
+          chunk.mesh.material.dispose();
+          chunks.delete(key);
+        }
+      }
+    }
+
+    const markerGroup = new THREE.Group();
+    scene.add(markerGroup);
+    const markerGeo = new THREE.ConeGeometry(2.2, 10, 6);
+    const markerMat = new THREE.MeshStandardMaterial({ color: 0x2f7f34, roughness: 0.9 });
+
+    function placeMarker(tree, x, z) {
+      const terrainY = terrainHeightAt(x, z);
+      tree.userData.worldX = x;
+      tree.userData.worldZ = z;
+      tree.position.set(x - renderOrigin.x, terrainY + 5, z - renderOrigin.z);
+    }
+
+    function syncMarkerRenderPositions() {
+      markerGroup.children.forEach((tree) => {
+        tree.position.x = tree.userData.worldX - renderOrigin.x;
+        tree.position.z = tree.userData.worldZ - renderOrigin.z;
+      });
+    }
+
+    const markerResetDistance = CHUNK_WORLD_SIZE * (RENDER_DISTANCE + 1.75);
+    const markerResetDistanceSq = markerResetDistance * markerResetDistance;
+
+    for (let i = 0; i < 420; i += 1) {
+      const tree = new THREE.Mesh(markerGeo, markerMat);
+      const x = (Math.random() - 0.5) * 3000;
+      const z = (Math.random() - 0.5) * 3000;
+      placeMarker(tree, x, z);
+      tree.castShadow = true;
+      markerGroup.add(tree);
+    }
+
+    const planeYaw = new THREE.Group();
+    const planeRoll = new THREE.Group();
+    const planePitch = new THREE.Group();
+    const plane = new THREE.Group();
+    planeYaw.add(planeRoll);
+    planeRoll.add(planePitch);
+    planePitch.add(plane);
+
+    const body = new THREE.Mesh(
+      new THREE.CapsuleGeometry(1.2, 5.5, 8, 14),
+      new THREE.MeshStandardMaterial({ color: 0xe7ebf3, metalness: 0.22, roughness: 0.42 })
+    );
+    body.rotation.z = Math.PI / 2;
+    body.castShadow = true;
+    plane.add(body);
+
+    const cockpit = new THREE.Mesh(
+      new THREE.SphereGeometry(1.05, 22, 20),
+      new THREE.MeshStandardMaterial({ color: 0x4f7abf, transparent: true, opacity: 0.7, roughness: 0.25 })
+    );
+    cockpit.scale.set(1.4, 0.7, 1);
+    cockpit.position.set(1.2, 0.52, 0);
+    cockpit.castShadow = true;
+    plane.add(cockpit);
+
+    const wingMat = new THREE.MeshStandardMaterial({ color: 0xd4403d, metalness: 0.16, roughness: 0.5 });
+    const wing = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.14, 7.7), wingMat);
+    wing.position.set(-0.2, -0.1, 0);
+    wing.castShadow = true;
+    plane.add(wing);
+
+    const tailWing = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.12, 2.8), wingMat);
+    tailWing.position.set(-3.35, 0.2, 0);
+    tailWing.castShadow = true;
+    plane.add(tailWing);
+
+    const fin = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.1, 0.14), wingMat);
+    fin.position.set(-3.5, 0.75, 0);
+    fin.castShadow = true;
+    plane.add(fin);
+
+    scene.add(planeYaw);
+
+    const planeWorld = new THREE.Vector3(0, 55, 0);
+    renderOrigin.copy(planeWorld);
+    renderOrigin.y = 0;
+    renderOriginTarget.copy(renderOrigin);
+    planeYaw.position.set(0, planeWorld.y, 0);
+    updateChunks(planeWorld.x, planeWorld.z);
+
+    const flight = {
+      velocity: new THREE.Vector3(55, 0, 0),
+      verticalSpeed: 0,
+      verticalAcceleration: 0,
+      speed: 55,
+      minSpeed: 24,
+      cruiseSpeed: 64,
+      maxSpeed: 145,
+      stallSpeed: 30,
+      pitch: 0,
+      roll: 0,
+      yaw: 0,
+      pitchVel: 0,
+      rollVel: 0,
+      yawVel: 0,
+      pitchInputSmoothed: 0,
+      rollInputSmoothed: 0,
+      yawInputSmoothed: 0,
+      pitchRate: 2.05,
+      rollRate: 2.7,
+      rudderRate: 1.6,
+      yawFromBank: 1.6,
+      angularDamping: 3.55,
+      liftCoeff: 0.0020,
+      gravity: 9.8,
+      dragCoeff: 0.010,
+      thrust: 92
+    };
+
+    const keyState = new Set();
+    const speedEl = document.getElementById('speed');
+    const altitudeEl = document.getElementById('altitude');
+
+    window.addEventListener('keydown', (event) => keyState.add(event.key.toLowerCase()));
+    window.addEventListener('keyup', (event) => keyState.delete(event.key.toLowerCase()));
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    const clock = new THREE.Clock();
+    const fixedStep = 1 / 120;
+    let accumulator = 0;
+    let markerRefreshTimer = 0;
+    const forwardVec = new THREE.Vector3();
+    const desiredVelocity = new THREE.Vector3();
+    const planeWorldQuat = new THREE.Quaternion();
+    const chaseOffsetVec = new THREE.Vector3();
+    const targetPosVec = new THREE.Vector3();
+    const lookTargetVec = new THREE.Vector3();
+
+    function updateRenderOrigin(dt) {
+      if (
+        Math.abs(planeWorld.x - renderOriginTarget.x) > floatingOriginThreshold
+        || Math.abs(planeWorld.z - renderOriginTarget.z) > floatingOriginThreshold
+      ) {
+        renderOriginTarget.x = planeWorld.x;
+        renderOriginTarget.z = planeWorld.z;
+      }
+
+      const blend = 1 - Math.exp(-6 * dt);
+      renderOrigin.lerp(renderOriginTarget, blend);
+      renderOrigin.y = 0;
+      if (renderOrigin.distanceToSquared(renderOriginTarget) < 0.0001) {
+        renderOrigin.copy(renderOriginTarget);
+      }
+    }
+
+    function syncRenderedWorld() {
+      planeYaw.position.set(
+        planeWorld.x - renderOrigin.x,
+        planeWorld.y,
+        planeWorld.z - renderOrigin.z
+      );
+      syncChunkRenderPositions();
+      syncMarkerRenderPositions();
+    }
+
+    function updateFlight(dt) {
+      const pitchInput = (keyState.has('w') ? 1 : 0) - (keyState.has('s') ? 1 : 0);
+      const rollInput = (keyState.has('d') ? 1 : 0) - (keyState.has('a') ? 1 : 0);
+      const yawInput = (keyState.has('q') ? 1 : 0) - (keyState.has('e') ? 1 : 0);
+
+      const inputSmoothing = 1 - Math.exp(-16 * dt);
+      flight.pitchInputSmoothed = THREE.MathUtils.lerp(flight.pitchInputSmoothed, pitchInput, inputSmoothing);
+      flight.rollInputSmoothed = THREE.MathUtils.lerp(flight.rollInputSmoothed, rollInput, inputSmoothing);
+      flight.yawInputSmoothed = THREE.MathUtils.lerp(flight.yawInputSmoothed, yawInput, inputSmoothing);
+
+      const controlAuthority = THREE.MathUtils.clamp((flight.speed - flight.stallSpeed) / 26, 0.38, 1.22);
+      flight.pitchVel += flight.pitchInputSmoothed * flight.pitchRate * controlAuthority * dt;
+      flight.rollVel += flight.rollInputSmoothed * flight.rollRate * controlAuthority * dt;
+      flight.yawVel += flight.yawInputSmoothed * flight.rudderRate * controlAuthority * dt;
+
+      flight.rollVel += (-flight.roll * 0.78 - flight.rollVel * 1.08) * dt;
+      const nearPitchLimit = THREE.MathUtils.clamp(Math.abs(flight.pitch) / 0.92, 0, 1);
+      flight.pitchVel += -Math.sign(flight.pitch) * nearPitchLimit * nearPitchLimit * 1.9 * dt;
+
+      const speedFactor = THREE.MathUtils.clamp(flight.speed / flight.cruiseSpeed, 0.58, 1.55);
+      const pitchFactor = 1 + Math.max(0, flight.pitch) * 0.1;
+      flight.yawVel += -Math.sin(flight.roll) * flight.yawFromBank * speedFactor * pitchFactor * dt;
+
+      flight.pitchVel = THREE.MathUtils.clamp(flight.pitchVel, -2.15, 2.15);
+      flight.rollVel = THREE.MathUtils.clamp(flight.rollVel, -2.8, 2.8);
+      flight.yawVel = THREE.MathUtils.clamp(flight.yawVel, -2.0, 2.0);
+
+      const baseDamping = Math.exp(-flight.angularDamping * dt);
+      const pitchDamping = Math.exp(-(flight.angularDamping + nearPitchLimit * 1.55) * dt);
+      flight.pitchVel *= pitchDamping;
+      flight.rollVel *= baseDamping;
+      flight.yawVel *= Math.exp(-(flight.angularDamping + 1.1) * dt);
+
+      flight.pitch = THREE.MathUtils.clamp(flight.pitch + flight.pitchVel * dt, -0.92, 0.92);
+      flight.roll = THREE.MathUtils.clamp(flight.roll + flight.rollVel * dt, -1.15, 1.15);
+      flight.yaw += flight.yawVel * dt;
+      flight.yaw = ((flight.yaw + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
+
+      planeYaw.rotation.y = flight.yaw;
+      planeRoll.rotation.x = flight.roll;
+      planePitch.rotation.z = flight.pitch;
+      planePitch.getWorldQuaternion(planeWorldQuat);
+
+      const forward = forwardVec.set(1, 0, 0).applyQuaternion(planeWorldQuat).normalize();
+      const drag = flight.dragCoeff * flight.speed * flight.speed;
+      const afterburnerBias = keyState.has('shift') ? 35 : 0;
+      const climbPenalty = Math.max(0, forward.y) * 24;
+      flight.speed += (flight.thrust + afterburnerBias - drag - climbPenalty) * dt;
+      flight.speed = THREE.MathUtils.clamp(flight.speed, flight.minSpeed, flight.maxSpeed);
+
+      const bankLiftLoss = Math.max(0.28, Math.cos(flight.roll));
+      const lift = flight.liftCoeff * flight.speed * flight.speed * bankLiftLoss;
+      const stallSink = Math.max(0, (flight.stallSpeed - flight.speed) * 1.3);
+      const pitchEffect = forward.y * flight.speed * 0.35;
+      const liftDirectionFactor = Math.max(0, 1 + forward.y * 1.5);
+      flight.verticalAcceleration = lift * liftDirectionFactor - flight.gravity - stallSink + pitchEffect;
+      flight.verticalSpeed += flight.verticalAcceleration * dt;
+      flight.verticalSpeed *= Math.exp(-1.35 * dt);
+      flight.verticalSpeed = THREE.MathUtils.clamp(flight.verticalSpeed, -55, 55);
+
+      desiredVelocity.copy(forward).multiplyScalar(flight.speed);
+      desiredVelocity.y = flight.verticalSpeed;
+      flight.velocity.copy(desiredVelocity);
+      planeWorld.addScaledVector(flight.velocity, dt);
+
+      const floorHeight = terrainHeightAt(planeWorld.x, planeWorld.z) + 4;
+      if (planeWorld.y < floorHeight) {
+        planeWorld.y = floorHeight;
+        flight.verticalSpeed = 0;
+        flight.pitch *= 0.96;
+        flight.pitchVel *= 0.6;
+      }
+
+      updateRenderOrigin(dt);
+      syncRenderedWorld();
+      updateChunks(planeWorld.x, planeWorld.z);
+
+      markerRefreshTimer += dt;
+      if (markerRefreshTimer >= 0.08) {
+        markerRefreshTimer = 0;
+        markerGroup.children.forEach((tree) => {
+          const dx = tree.userData.worldX - planeWorld.x;
+          const dz = tree.userData.worldZ - planeWorld.z;
+          if (dx * dx + dz * dz > markerResetDistanceSq) {
+            const x = planeWorld.x + (Math.random() - 0.5) * 1700;
+            const z = planeWorld.z + (Math.random() - 0.5) * 1700;
+            placeMarker(tree, x, z);
+          }
+        });
+      }
+
+      speedEl.textContent = flight.speed.toFixed(0);
+      altitudeEl.textContent = Math.max(0, planeWorld.y - terrainHeightAt(planeWorld.x, planeWorld.z)).toFixed(0);
+    }
+
+    function updateCamera(dt) {
+      chaseOffsetVec.set(-19, 8.5, 0).applyQuaternion(planeWorldQuat);
+      targetPosVec.copy(planeYaw.position).add(chaseOffsetVec);
+      camera.position.lerp(targetPosVec, 1 - Math.exp(-5.2 * dt));
+
+      lookTargetVec
+        .set(10, 1.8, 0)
+        .applyQuaternion(planeWorldQuat)
+        .add(planeWorld)
+        .sub(renderOrigin);
+
+      camera.lookAt(lookTargetVec);
+    }
+
+    function animate() {
+      const dt = Math.min(clock.getDelta(), 0.04);
+      accumulator += dt;
+
+      let substeps = 0;
+      while (accumulator >= fixedStep && substeps < 5) {
+        updateFlight(fixedStep);
+        accumulator -= fixedStep;
+        substeps += 1;
+      }
+
+      if (substeps === 5 && accumulator > fixedStep * 2) {
+        accumulator = fixedStep;
+      }
+
+      updateCamera(dt);
+      renderer.render(scene, camera);
+      requestAnimationFrame(animate);
+    }
+
+    animate();
+  </script>
+</body>
+</html>
