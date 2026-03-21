@@ -583,8 +583,7 @@
       // Lift vector tilt: banking redirects lift sideways, which now drives turning instead of roll->yaw coupling.
       const liftForce = flight.liftCoeff * flight.speed * flight.speed * (1 + effectiveAoa * flight.aoaLiftFactor);
       const verticalLift = liftForce * Math.cos(flight.roll);
-      const sidewaysForce = liftForce * Math.sin(flight.roll);
-      flight.yawVel += (sidewaysForce * flight.liftYawFactor / Math.max(flight.speed, 1)) * dt;
+      const sidewaysForce = -liftForce * Math.sin(flight.roll);
 
       flight.verticalAcceleration = verticalLift - flight.gravity;
       if (flight.speed < flight.stallSpeed) {
