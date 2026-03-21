@@ -365,192 +365,124 @@
     planeRoll.add(planePitch);
     planePitch.add(plane);
 
-    const stealthBodyMat = new THREE.MeshStandardMaterial({
-      color: 0x7f8894,
-      metalness: 0.28,
+    const fighterBodyMat = new THREE.MeshStandardMaterial({
+      color: 0x8f98a3,
+      metalness: 0.2,
       roughness: 0.62,
       flatShading: true
     });
-    const stealthDarkMat = new THREE.MeshStandardMaterial({
-      color: 0x535c66,
-      metalness: 0.2,
-      roughness: 0.7,
+    const fighterDarkMat = new THREE.MeshStandardMaterial({
+      color: 0x5a626b,
+      metalness: 0.16,
+      roughness: 0.74,
       flatShading: true
     });
     const canopyMat = new THREE.MeshStandardMaterial({
-      color: 0x6a89b8,
-      emissive: 0x0f1d30,
-      metalness: 0.25,
-      roughness: 0.18,
+      color: 0x6d8fbe,
+      emissive: 0x11233b,
+      metalness: 0.18,
+      roughness: 0.22,
       transparent: true,
-      opacity: 0.82
+      opacity: 0.8
     });
 
-    const fuselagePoints = [
-      new THREE.Vector2(0.0, 0.05),
-      new THREE.Vector2(0.2, 0.22),
-      new THREE.Vector2(0.7, 0.5),
-      new THREE.Vector2(1.4, 0.74),
-      new THREE.Vector2(2.6, 0.92),
-      new THREE.Vector2(4.2, 1.0),
-      new THREE.Vector2(6.0, 0.94),
-      new THREE.Vector2(7.8, 0.82),
-      new THREE.Vector2(9.1, 0.62),
-      new THREE.Vector2(10.1, 0.42),
-      new THREE.Vector2(10.8, 0.2),
-      new THREE.Vector2(11.2, 0.08)
-    ];
-    const fuselage = new THREE.Mesh(
-      new THREE.LatheGeometry(fuselagePoints, 10),
-      stealthBodyMat
+    const body = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.55, 0.9, 8.8, 8),
+      fighterBodyMat
     );
-    fuselage.rotation.z = -Math.PI / 2;
-    fuselage.scale.set(0.82, 0.9, 1.45);
-    fuselage.position.set(0.1, 0.18, 0);
-    fuselage.castShadow = true;
-    plane.add(fuselage);
+    body.rotation.z = -Math.PI / 2;
+    body.scale.set(1, 1.05, 1.28);
+    body.position.set(0.15, 0.12, 0);
+    body.castShadow = true;
+    plane.add(body);
 
     const nose = new THREE.Mesh(
-      new THREE.ConeGeometry(0.42, 2.1, 4),
-      stealthBodyMat
+      new THREE.ConeGeometry(0.5, 2.2, 4),
+      fighterBodyMat
     );
     nose.rotation.z = -Math.PI / 2;
-    nose.position.set(6.45, 0.2, 0);
+    nose.position.set(5.55, 0.14, 0);
     nose.castShadow = true;
     plane.add(nose);
 
     const canopy = new THREE.Mesh(
-      new THREE.BoxGeometry(2.15, 0.68, 1.08),
+      new THREE.BoxGeometry(1.8, 0.58, 1.05),
       canopyMat
     );
-    canopy.position.set(2.05, 0.92, 0);
-    canopy.rotation.z = THREE.MathUtils.degToRad(-8);
+    canopy.position.set(1.75, 0.8, 0);
+    canopy.rotation.z = THREE.MathUtils.degToRad(-7);
     canopy.castShadow = true;
     plane.add(canopy);
 
-    const chineLeft = new THREE.Mesh(
-      new THREE.BoxGeometry(2.4, 0.18, 0.58),
-      stealthBodyMat
-    );
-    chineLeft.position.set(2.95, 0.46, 0.88);
-    chineLeft.rotation.set(0, THREE.MathUtils.degToRad(14), THREE.MathUtils.degToRad(-10));
-    chineLeft.castShadow = true;
-    plane.add(chineLeft);
-
-    const chineRight = chineLeft.clone();
-    chineRight.position.z *= -1;
-    chineRight.rotation.y *= -1;
-    plane.add(chineRight);
-
-    const intakeLeft = new THREE.Mesh(
-      new THREE.BoxGeometry(1.45, 0.72, 0.82),
-      stealthDarkMat
-    );
-    intakeLeft.position.set(0.62, 0.18, 1.08);
-    intakeLeft.rotation.y = THREE.MathUtils.degToRad(18);
-    intakeLeft.castShadow = true;
-    plane.add(intakeLeft);
-
-    const intakeRight = intakeLeft.clone();
-    intakeRight.position.z *= -1;
-    intakeRight.rotation.y *= -1;
-    plane.add(intakeRight);
-
     const wingShape = new THREE.Shape();
-    wingShape.moveTo(-2.8, 0.0);
-    wingShape.lineTo(-0.1, 0.82);
-    wingShape.lineTo(3.35, 2.85);
-    wingShape.lineTo(1.25, 0.32);
-    wingShape.lineTo(-1.15, -0.18);
-    wingShape.lineTo(-2.8, 0.0);
-    const wingExtrude = new THREE.ExtrudeGeometry(wingShape, {
+    wingShape.moveTo(-2.4, 0);
+    wingShape.lineTo(-0.6, 0.52);
+    wingShape.lineTo(2.3, 2.3);
+    wingShape.lineTo(0.9, 0.12);
+    wingShape.lineTo(-1.2, -0.12);
+    wingShape.lineTo(-2.4, 0);
+    const wingGeometry = new THREE.ExtrudeGeometry(wingShape, {
       depth: 0.12,
       bevelEnabled: false
     });
-    wingExtrude.rotateX(Math.PI / 2);
-    wingExtrude.translate(0, 0.06, -0.06);
+    wingGeometry.rotateX(Math.PI / 2);
+    wingGeometry.translate(0, 0.05, -0.06);
 
-    const leftWing = new THREE.Mesh(wingExtrude, stealthBodyMat);
-    leftWing.position.set(0.35, 0.04, 0.88);
+    const leftWing = new THREE.Mesh(wingGeometry, fighterBodyMat);
+    leftWing.position.set(0.1, -0.02, 0.55);
     leftWing.castShadow = true;
     plane.add(leftWing);
 
     const rightWing = leftWing.clone();
-    rightWing.position.z = -0.88;
+    rightWing.position.z = -0.55;
     rightWing.scale.z = -1;
     plane.add(rightWing);
 
-    const tailShape = new THREE.Shape();
-    tailShape.moveTo(-1.2, 0.0);
-    tailShape.lineTo(0.2, 0.46);
-    tailShape.lineTo(1.75, 1.32);
-    tailShape.lineTo(0.85, 0.18);
-    tailShape.lineTo(-0.55, -0.1);
-    tailShape.lineTo(-1.2, 0.0);
-    const tailExtrude = new THREE.ExtrudeGeometry(tailShape, {
-      depth: 0.08,
-      bevelEnabled: false
-    });
-    tailExtrude.rotateX(Math.PI / 2);
-    tailExtrude.translate(0, 0.04, -0.04);
+    const tailWing = new THREE.Mesh(
+      new THREE.BoxGeometry(1.8, 0.12, 2.5),
+      fighterBodyMat
+    );
+    tailWing.position.set(-3.35, 0.32, 0);
+    tailWing.castShadow = true;
+    plane.add(tailWing);
 
-    const leftTailWing = new THREE.Mesh(tailExtrude, stealthBodyMat);
-    leftTailWing.position.set(-3.55, 0.42, 0.72);
-    leftTailWing.castShadow = true;
-    plane.add(leftTailWing);
-
-    const rightTailWing = leftTailWing.clone();
-    rightTailWing.position.z = -0.72;
-    rightTailWing.scale.z = -1;
-    plane.add(rightTailWing);
-
-    const tailFinGeo = new THREE.BoxGeometry(1.35, 1.78, 0.16);
-    const leftFin = new THREE.Mesh(tailFinGeo, stealthBodyMat);
-    leftFin.position.set(-3.2, 1.36, 0.72);
-    leftFin.rotation.set(THREE.MathUtils.degToRad(-7), 0, THREE.MathUtils.degToRad(-24));
+    const finGeometry = new THREE.BoxGeometry(1.2, 1.5, 0.14);
+    const leftFin = new THREE.Mesh(finGeometry, fighterBodyMat);
+    leftFin.position.set(-3.55, 1.22, 0.48);
+    leftFin.rotation.z = THREE.MathUtils.degToRad(-22);
     leftFin.castShadow = true;
     plane.add(leftFin);
 
     const rightFin = leftFin.clone();
-    rightFin.position.z = -0.72;
-    rightFin.rotation.z *= -1;
+    rightFin.position.z = -0.48;
+    rightFin.rotation.z = THREE.MathUtils.degToRad(22);
     plane.add(rightFin);
 
     const engineLeft = new THREE.Mesh(
-      new THREE.BoxGeometry(3.1, 0.72, 0.86),
-      stealthDarkMat
+      new THREE.BoxGeometry(2.7, 0.58, 0.66),
+      fighterDarkMat
     );
-    engineLeft.position.set(-1.28, 0.18, 0.58);
+    engineLeft.position.set(-1.55, -0.02, 0.42);
     engineLeft.castShadow = true;
     plane.add(engineLeft);
 
     const engineRight = engineLeft.clone();
-    engineRight.position.z = -0.58;
+    engineRight.position.z = -0.42;
     plane.add(engineRight);
 
-    const exhaustLeft = new THREE.Mesh(
-      new THREE.BoxGeometry(0.82, 0.42, 0.52),
-      new THREE.MeshStandardMaterial({
-        color: 0x353c44,
-        emissive: 0x1d2228,
-        metalness: 0.42,
-        roughness: 0.48,
-        flatShading: true
-      })
+    const exhaust = new THREE.Mesh(
+      new THREE.BoxGeometry(0.72, 0.34, 1.12),
+      fighterDarkMat
     );
-    exhaustLeft.position.set(-5.12, 0.06, 0.58);
-    exhaustLeft.castShadow = true;
-    plane.add(exhaustLeft);
-
-    const exhaustRight = exhaustLeft.clone();
-    exhaustRight.position.z = -0.58;
-    plane.add(exhaustRight);
+    exhaust.position.set(-4.75, 0.02, 0);
+    exhaust.castShadow = true;
+    plane.add(exhaust);
 
     const belly = new THREE.Mesh(
-      new THREE.BoxGeometry(4.8, 0.22, 1.6),
-      stealthDarkMat
+      new THREE.BoxGeometry(3.4, 0.18, 1.28),
+      fighterDarkMat
     );
-    belly.position.set(-0.15, -0.36, 0);
+    belly.position.set(-0.55, -0.5, 0);
     belly.castShadow = true;
     plane.add(belly);
 
