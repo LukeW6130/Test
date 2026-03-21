@@ -30,7 +30,28 @@
 
     #hud h1 { margin: 0 0 6px; font-size: 1.05rem; }
     #hud p { margin: 0; line-height: 1.4; font-size: 0.88rem; }
-    #speed, #altitude { font-weight: 700; }
+    #speed, #altitude, #throttleValue { font-weight: 700; }
+    #throttlePanel {
+      margin-top: 10px;
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 8px;
+      align-items: center;
+      font-size: 0.84rem;
+    }
+    #throttleBar {
+      height: 10px;
+      border-radius: 999px;
+      background: rgba(10, 39, 64, 0.12);
+      overflow: hidden;
+      border: 1px solid rgba(10, 39, 64, 0.12);
+    }
+    #throttleFill {
+      height: 100%;
+      width: 72%;
+      background: linear-gradient(90deg, #6cc7ff 0%, #3f82ff 60%, #ff9d3f 100%);
+      transform-origin: left center;
+    }
     canvas { display: block; }
   </style>
 </head>
@@ -38,9 +59,16 @@
   <aside id="hud">
     <h1>Sky Glide 3D</h1>
     <p>
-      WASD flight controls: W/S pitch, A/D roll, Q/E yaw. Shift = afterburner boost.<br />
+      WASD flight controls: W/S pitch, A/D roll, Q/E yaw. R/F throttle up/down. Shift = afterburner boost.<br />
       Airspeed: <span id="speed">0</span> u/s | Altitude: <span id="altitude">0</span> m
     </p>
+    <div id="throttlePanel" aria-label="Throttle readout">
+      <span>Throttle</span>
+      <div id="throttleBar" aria-hidden="true">
+        <div id="throttleFill"></div>
+      </div>
+      <span id="throttleValue">72%</span>
+    </div>
   </aside>
 
   <script type="module">
@@ -380,13 +408,11 @@
 
     const flight = {
       velocity: new THREE.Vector3(55, 0, 0),
-      verticalSpeed: 0,
-      verticalAcceleration: 0,
       speed: 55,
-      minSpeed: 24,
-      cruiseSpeed: 64,
-      maxSpeed: 145,
-      stallSpeed: 30,
+      minSpeed: 25,
+      cruiseSpeed: 60,
+      maxSpeed: 150,
+      stallSpeed: 25,
       pitch: 0,
       roll: 0,
       yaw: 0,
@@ -396,20 +422,37 @@
       pitchInputSmoothed: 0,
       rollInputSmoothed: 0,
       yawInputSmoothed: 0,
-      pitchRate: 2.05,
-      rollRate: 2.7,
-      rudderRate: 1.6,
-      yawFromBank: 1.6,
-      angularDamping: 3.55,
-      liftCoeff: 0.0020,
+      pitchRate: 3.0,
+      rollRate: 4.0,
+      yawRate: 0.8,
+      pitchDamping: 3.0,
+      rollDamping: 3.0,
+      yawDamping: 2.0,
+      liftCoeff: 0.0005,
+      dragCoeff: 0.002,
+      inducedDrag: 0.0001,
+      thrust: 80,
+      throttle: 0.72,
+      throttleAdjustRate: 0.55,
+      afterburnerFactor: 1.8,
       gravity: 9.8,
-      dragCoeff: 0.010,
-      thrust: 92
+      stallSink: 5.0,
+      aoa: 0,
+      aoaLiftFactor: 1.6,
+      aoaDragFactor: 0.65,
+      criticalAoa: 0.22,
+      maxAoa: 0.48,
+      turnDragCoeff: 0.00018,
+      liftYawFactor: 0.55,
+      verticalSpeed: 0,
+      verticalAcceleration: 0
     };
 
     const keyState = new Set();
     const speedEl = document.getElementById('speed');
     const altitudeEl = document.getElementById('altitude');
+    const throttleValueEl = document.getElementById('throttleValue');
+    const throttleFillEl = document.getElementById('throttleFill');
 
     window.addEventListener('keydown', (event) => keyState.add(event.key.toLowerCase()));
     window.addEventListener('keyup', (event) => keyState.delete(event.key.toLowerCase()));
@@ -424,6 +467,7 @@
     let accumulator = 0;
     let markerRefreshTimer = 0;
     const forwardVec = new THREE.Vector3();
+    const velocityDirVec = new THREE.Vector3();
     const desiredVelocity = new THREE.Vector3();
     const planeWorldQuat = new THREE.Quaternion();
     const chaseOffsetVec = new THREE.Vector3();
@@ -463,36 +507,35 @@
       const rollInput = (keyState.has('d') ? 1 : 0) - (keyState.has('a') ? 1 : 0);
       const yawInput = (keyState.has('q') ? 1 : 0) - (keyState.has('e') ? 1 : 0);
 
-      const inputSmoothing = 1 - Math.exp(-16 * dt);
-      flight.pitchInputSmoothed = THREE.MathUtils.lerp(flight.pitchInputSmoothed, pitchInput, inputSmoothing);
-      flight.rollInputSmoothed = THREE.MathUtils.lerp(flight.rollInputSmoothed, rollInput, inputSmoothing);
-      flight.yawInputSmoothed = THREE.MathUtils.lerp(flight.yawInputSmoothed, yawInput, inputSmoothing);
+      const throttleInput = (keyState.has('r') ? 1 : 0) - (keyState.has('f') ? 1 : 0);
+      flight.throttle = THREE.MathUtils.clamp(
+        flight.throttle + throttleInput * flight.throttleAdjustRate * dt,
+        0,
+        1
+      );
 
-      const controlAuthority = THREE.MathUtils.clamp((flight.speed - flight.stallSpeed) / 26, 0.38, 1.22);
-      flight.pitchVel += flight.pitchInputSmoothed * flight.pitchRate * controlAuthority * dt;
-      flight.rollVel += flight.rollInputSmoothed * flight.rollRate * controlAuthority * dt;
-      flight.yawVel += flight.yawInputSmoothed * flight.rudderRate * controlAuthority * dt;
+      const inputAlpha = 1 - Math.exp(-16 * dt);
+      flight.pitchInputSmoothed = THREE.MathUtils.lerp(flight.pitchInputSmoothed, pitchInput, inputAlpha);
+      flight.rollInputSmoothed = THREE.MathUtils.lerp(flight.rollInputSmoothed, rollInput, inputAlpha);
+      flight.yawInputSmoothed = THREE.MathUtils.lerp(flight.yawInputSmoothed, yawInput, inputAlpha);
 
-      flight.rollVel += (-flight.roll * 0.78 - flight.rollVel * 1.08) * dt;
-      const nearPitchLimit = THREE.MathUtils.clamp(Math.abs(flight.pitch) / 0.92, 0, 1);
-      flight.pitchVel += -Math.sign(flight.pitch) * nearPitchLimit * nearPitchLimit * 1.9 * dt;
+      // High-speed control stiffening: the faster the jet goes, the heavier pitch/roll inputs feel.
+      const speedFactor = THREE.MathUtils.clamp(flight.speed / flight.maxSpeed, 0, 1);
+      const controlScale = Math.max(0.6, 1 - speedFactor * 0.4);
+      flight.pitchVel += flight.pitchInputSmoothed * flight.pitchRate * controlScale * dt;
+      flight.rollVel += flight.rollInputSmoothed * flight.rollRate * controlScale * dt;
+      flight.yawVel += flight.yawInputSmoothed * flight.yawRate * dt;
 
-      const speedFactor = THREE.MathUtils.clamp(flight.speed / flight.cruiseSpeed, 0.58, 1.55);
-      const pitchFactor = 1 + Math.max(0, flight.pitch) * 0.1;
-      flight.yawVel += -Math.sin(flight.roll) * flight.yawFromBank * speedFactor * pitchFactor * dt;
+      if (Math.abs(flight.pitchInputSmoothed) < 1e-3) {
+        flight.pitchVel -= 0.15 * dt;
+      }
 
-      flight.pitchVel = THREE.MathUtils.clamp(flight.pitchVel, -2.15, 2.15);
-      flight.rollVel = THREE.MathUtils.clamp(flight.rollVel, -2.8, 2.8);
-      flight.yawVel = THREE.MathUtils.clamp(flight.yawVel, -2.0, 2.0);
+      flight.pitchVel -= flight.pitchVel * flight.pitchDamping * dt;
+      flight.rollVel -= flight.rollVel * flight.rollDamping * dt;
+      flight.yawVel -= flight.yawVel * flight.yawDamping * dt;
 
-      const baseDamping = Math.exp(-flight.angularDamping * dt);
-      const pitchDamping = Math.exp(-(flight.angularDamping + nearPitchLimit * 1.55) * dt);
-      flight.pitchVel *= pitchDamping;
-      flight.rollVel *= baseDamping;
-      flight.yawVel *= Math.exp(-(flight.angularDamping + 1.1) * dt);
-
-      flight.pitch = THREE.MathUtils.clamp(flight.pitch + flight.pitchVel * dt, -0.92, 0.92);
-      flight.roll = THREE.MathUtils.clamp(flight.roll + flight.rollVel * dt, -1.15, 1.15);
+      flight.pitch = THREE.MathUtils.clamp(flight.pitch + flight.pitchVel * dt, -0.8, 0.8);
+      flight.roll = THREE.MathUtils.clamp(flight.roll + flight.rollVel * dt, -1.2, 1.2);
       flight.yaw += flight.yawVel * dt;
       flight.yaw = ((flight.yaw + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
 
@@ -501,35 +544,71 @@
       planePitch.rotation.z = flight.pitch;
       planePitch.getWorldQuaternion(planeWorldQuat);
 
-      const forward = forwardVec.set(1, 0, 0).applyQuaternion(planeWorldQuat).normalize();
-      const drag = flight.dragCoeff * flight.speed * flight.speed;
-      const afterburnerBias = keyState.has('shift') ? 35 : 0;
-      const climbPenalty = Math.max(0, forward.y) * 24;
-      flight.speed += (flight.thrust + afterburnerBias - drag - climbPenalty) * dt;
+      forwardVec.set(1, 0, 0).applyQuaternion(planeWorldQuat).normalize();
+      velocityDirVec.copy(flight.velocity);
+      if (velocityDirVec.lengthSq() > 1e-6) {
+        velocityDirVec.normalize();
+      } else {
+        velocityDirVec.copy(forwardVec);
+      }
+
+      // Angle of attack: compare nose direction to flight-path direction.
+      const forwardPitch = Math.atan2(forwardVec.y, Math.hypot(forwardVec.x, forwardVec.z));
+      const velocityPitch = Math.atan2(velocityDirVec.y, Math.hypot(velocityDirVec.x, velocityDirVec.z));
+      flight.aoa = THREE.MathUtils.clamp(forwardPitch - velocityPitch, -flight.maxAoa, flight.maxAoa);
+      const positiveAoa = Math.max(0, flight.aoa);
+      const stallProgress = THREE.MathUtils.clamp(
+        (positiveAoa - flight.criticalAoa) / Math.max(1e-6, flight.maxAoa - flight.criticalAoa),
+        0,
+        1
+      );
+      const effectiveAoa = positiveAoa * (1 - 0.65 * stallProgress);
+
+      let thrust = flight.thrust * flight.throttle;
+      if (keyState.has('shift')) {
+        thrust *= flight.afterburnerFactor;
+      }
+
+      // AoA and turn/G loading both add induced drag, so hard pulls bleed speed.
+      const loadFactor = 1 / Math.max(0.35, Math.abs(Math.cos(flight.roll)));
+      const parasiteDrag = flight.dragCoeff * flight.speed * flight.speed;
+      const inducedDrag = flight.inducedDrag * flight.speed * flight.speed * (
+        Math.abs(flight.roll) + Math.abs(flight.aoa) * flight.aoaDragFactor
+      );
+      const turnDrag = flight.turnDragCoeff * loadFactor * Math.abs(flight.pitchInputSmoothed) * flight.speed * flight.speed;
+      const totalDrag = parasiteDrag + inducedDrag + turnDrag;
+      flight.speed += (thrust - totalDrag) * dt;
       flight.speed = THREE.MathUtils.clamp(flight.speed, flight.minSpeed, flight.maxSpeed);
 
-      const bankLiftLoss = Math.max(0.28, Math.cos(flight.roll));
-      const lift = flight.liftCoeff * flight.speed * flight.speed * bankLiftLoss;
-      const stallSink = Math.max(0, (flight.stallSpeed - flight.speed) * 1.3);
-      const pitchEffect = forward.y * flight.speed * 0.35;
-      const liftDirectionFactor = Math.max(0, 1 + forward.y * 1.5);
-      flight.verticalAcceleration = lift * liftDirectionFactor - flight.gravity - stallSink + pitchEffect;
-      flight.verticalSpeed += flight.verticalAcceleration * dt;
-      flight.verticalSpeed *= Math.exp(-1.35 * dt);
-      flight.verticalSpeed = THREE.MathUtils.clamp(flight.verticalSpeed, -55, 55);
+      // Lift vector tilt: banking redirects lift sideways, which now drives turning instead of roll->yaw coupling.
+      const liftForce = flight.liftCoeff * flight.speed * flight.speed * (1 + effectiveAoa * flight.aoaLiftFactor);
+      const verticalLift = liftForce * Math.cos(flight.roll);
+      const sidewaysForce = liftForce * Math.sin(flight.roll);
+      flight.yawVel += (sidewaysForce * flight.liftYawFactor / Math.max(flight.speed, 1)) * dt;
 
-      desiredVelocity.copy(forward).multiplyScalar(flight.speed);
+      flight.verticalAcceleration = verticalLift - flight.gravity;
+      if (flight.speed < flight.stallSpeed) {
+        flight.verticalAcceleration -= (flight.stallSpeed - flight.speed) * flight.stallSink;
+      }
+      if (stallProgress > 0) {
+        flight.verticalAcceleration -= stallProgress * 6;
+      }
+
+      flight.verticalSpeed += flight.verticalAcceleration * dt;
+      flight.verticalSpeed = THREE.MathUtils.clamp(flight.verticalSpeed, -40, 40);
+
+      desiredVelocity.copy(forwardVec).multiplyScalar(flight.speed);
       desiredVelocity.y = flight.verticalSpeed;
       flight.velocity.copy(desiredVelocity);
       planeWorld.addScaledVector(flight.velocity, dt);
 
       const groundY = terrainHeightAt(planeWorld.x, planeWorld.z);
-      const floorHeight = groundY + 4;
+      const floorHeight = groundY + 5;
       if (planeWorld.y < floorHeight) {
         planeWorld.y = floorHeight;
         flight.verticalSpeed = 0;
-        flight.pitch *= 0.96;
-        flight.pitchVel *= 0.6;
+        flight.pitch *= 0.9;
+        flight.pitchVel *= 0.5;
       }
 
       updateRenderOrigin();
@@ -554,6 +633,9 @@
 
       speedEl.textContent = flight.speed.toFixed(0);
       altitudeEl.textContent = Math.max(0, planeWorld.y - groundY).toFixed(0);
+      const throttlePercent = Math.round(flight.throttle * 100);
+      throttleValueEl.textContent = `${throttlePercent}%`;
+      throttleFillEl.style.width = `${throttlePercent}%`;
     }
 
     function updateCamera(dt) {

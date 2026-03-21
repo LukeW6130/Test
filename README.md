@@ -28,5 +28,6 @@ Then open: <http://localhost:8000>
 - **W / S**: pitch up/down (elevator)
 - **A / D**: roll left/right (ailerons)
 - **Q / E**: yaw left/right (rudder)
-- **Shift**: afterburner burst for fighter-jet-style acceleration
+- **R / F**: raise or lower throttle
+- **Shift**: afterburner boost on top of your current throttle
 - Turns are coordinated by your bank angle for a more realistic feel
