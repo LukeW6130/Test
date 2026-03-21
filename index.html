@@ -585,11 +585,18 @@
       // Base lift
       const liftBase = flight.liftCoeff * flight.speed * flight.speed;
       
-      // AoA-based lift (can go negative)
+      // Base lift so the plane can actually fly level
+      const baseLift = 0.3;
+      
+      // AoA influence (adds or subtracts from base lift)
       const liftFromAoa = flight.aoa * flight.aoaLiftFactor;
       
-      // Clamp to avoid instability
-      const liftCoefficient = THREE.MathUtils.clamp(liftFromAoa, -0.4, 1.2);
+      // Combine them
+      const liftCoefficient = THREE.MathUtils.clamp(
+        baseLift + liftFromAoa,
+        -0.4,
+        1.2
+      );
       
       // Final lift force
       const liftForce = liftBase * liftCoefficient;
