@@ -534,7 +534,7 @@
       flight.rollVel -= flight.rollVel * flight.rollDamping * dt;
       flight.yawVel -= flight.yawVel * flight.yawDamping * dt;
 
-      flight.pitch = THREE.MathUtils.clamp(flight.pitch + flight.pitchVel * dt, -0.8, 0.8);
+      flight.pitch = THREE.MathUtils.clamp(flight.pitch + flight.pitchVel * dt, -1.2, 1.2);
       flight.roll = THREE.MathUtils.clamp(flight.roll + flight.rollVel * dt, -1.2, 1.2);
       flight.yaw += flight.yawVel * dt;
       flight.yaw = ((flight.yaw + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
@@ -581,8 +581,21 @@
       flight.speed = THREE.MathUtils.clamp(flight.speed, flight.minSpeed, flight.maxSpeed);
 
       // Lift vector tilt: banking redirects lift sideways, which now drives turning instead of roll->yaw coupling.
-      const liftForce = flight.liftCoeff * flight.speed * flight.speed * (1 + effectiveAoa * flight.aoaLiftFactor);
+      // Base lift scales with AoA (not constant)
+      const liftBase = flight.liftCoeff * flight.speed * flight.speed;
+      
+      // Allow negative AoA to reduce lift (and even push downward slightly)
+      const liftFromAoa = flight.aoa * flight.aoaLiftFactor;
+      
+      // Final lift coefficient (clamped so it doesn’t explode)
+      const liftCoefficient = THREE.MathUtils.clamp(liftFromAoa, -0.4, 1.2);
+      
+      // Total lift force
+      const liftForce = liftBase * liftCoefficient;
+      
+      // Apply bank tilt
       const verticalLift = liftForce * Math.cos(flight.roll);
+      const sidewaysForce = -liftForce * Math.sin(flight.roll);
       const sidewaysForce = -liftForce * Math.sin(flight.roll);
 
       flight.verticalAcceleration = verticalLift - flight.gravity;
