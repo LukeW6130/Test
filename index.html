@@ -596,7 +596,6 @@
       // Apply bank tilt
       const verticalLift = liftForce * Math.cos(flight.roll);
       const sidewaysForce = -liftForce * Math.sin(flight.roll);
-      const sidewaysForce = -liftForce * Math.sin(flight.roll);
 
       flight.verticalAcceleration = verticalLift - flight.gravity;
       if (flight.speed < flight.stallSpeed) {
