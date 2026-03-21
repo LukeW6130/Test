@@ -380,37 +380,66 @@
 
     const flight = {
       velocity: new THREE.Vector3(55, 0, 0),
+    
+      // Core flight state
       speed: 55,
-      minSpeed: 25,
-      cruiseSpeed: 60,
-      maxSpeed: 150,
-      stallSpeed: 25,
+      minSpeed: 28,
+      cruiseSpeed: 72,
+      maxSpeed: 190,
+      stallSpeed: 34,
+    
+      // Orientation
       pitch: 0,
       roll: 0,
       yaw: 0,
+    
+      // Angular velocities
       pitchVel: 0,
       rollVel: 0,
       yawVel: 0,
+    
+      // Smoothed input
       pitchInputSmoothed: 0,
       rollInputSmoothed: 0,
       yawInputSmoothed: 0,
-      pitchRate: 3.0,
-      rollRate: 4.0,
-      yawRate: 0.8,
-      bankYawFactor: 0.3,
-      pitchDamping: 3.0,
-      rollDamping: 3.0,
-      yawDamping: 2.0,
-      liftCoeff: 0.0005,
-      dragCoeff: 0.002,
-      inducedDrag: 0.0001,
-      thrust: 80,
-      afterburnerFactor: 1.8,
+    
+      // Control response
+      // Higher rollRate = snappier bank.
+      // Lower yawRate = less rudder authority.
+      pitchRate: 2.2,
+      rollRate: 4.4,
+      yawRate: 0.35,
+    
+      // Bank-to-turn coupling: bigger = tighter coordinated turns.
+      // If the jet turns the wrong way in your model, flip the sign
+      // on the line that uses this value in updateFlight().
+      bankYawFactor: 2.0,
+    
+      // Stability / damping
+      pitchDamping: 2.4,
+      rollDamping: 3.2,
+      yawDamping: 2.6,
+    
+      // Aerodynamics
+      // Lift is proportional to speed^2.
+      // Drag is split into parasite drag and induced drag.
+      liftCoeff: 0.0022,
+      dragCoeff: 0.0085,
+      inducedDragCoeff: 0.0065,
+    
+      // Engine
+      thrust: 96,
+      afterburnerFactor: 1.7,
+    
+      // Natural behavior
       gravity: 9.8,
-      stallSink: 5.0,
+      noseDownTrim: 0.18,
+    
+      // Vertical motion
       verticalSpeed: 0,
       verticalAcceleration: 0
     };
+
 
     const keyState = new Set();
     const speedEl = document.getElementById('speed');
@@ -467,75 +496,117 @@
       const pitchInput = (keyState.has('w') ? 1 : 0) - (keyState.has('s') ? 1 : 0);
       const rollInput = (keyState.has('d') ? 1 : 0) - (keyState.has('a') ? 1 : 0);
       const yawInput = (keyState.has('q') ? 1 : 0) - (keyState.has('e') ? 1 : 0);
-
-      const inputAlpha = 1 - Math.exp(-16 * dt);
+    
+      // Smooth input so the plane feels responsive without jitter.
+      const inputAlpha = 1 - Math.exp(-18 * dt);
       flight.pitchInputSmoothed = THREE.MathUtils.lerp(flight.pitchInputSmoothed, pitchInput, inputAlpha);
       flight.rollInputSmoothed = THREE.MathUtils.lerp(flight.rollInputSmoothed, rollInput, inputAlpha);
       flight.yawInputSmoothed = THREE.MathUtils.lerp(flight.yawInputSmoothed, yawInput, inputAlpha);
-
-      flight.pitchVel += flight.pitchInputSmoothed * flight.pitchRate * dt;
-      flight.rollVel += flight.rollInputSmoothed * flight.rollRate * dt;
-      flight.yawVel += flight.yawInputSmoothed * flight.yawRate * dt;
-      flight.yawVel += flight.rollVel * flight.bankYawFactor * dt;
-
-      if (Math.abs(flight.pitchInputSmoothed) < 1e-3) {
-        flight.pitchVel -= 0.15 * dt;
+    
+      // Speed matters: controls get a bit stronger once the jet has airflow,
+      // but not so much that it becomes twitchy near stall.
+      const speedAuthority = THREE.MathUtils.clamp(
+        (flight.speed - flight.stallSpeed) / (flight.cruiseSpeed - flight.stallSpeed),
+        0.2,
+        1.35
+      );
+    
+      // Angular acceleration from pilot input.
+      flight.pitchVel += flight.pitchInputSmoothed * flight.pitchRate * speedAuthority * dt;
+      flight.rollVel += flight.rollInputSmoothed * flight.rollRate * (0.85 + speedAuthority * 0.5) * dt;
+      flight.yawVel += flight.yawInputSmoothed * flight.yawRate * 0.7 * dt;
+    
+      // Real jets turn mainly because they bank.
+      // IMPORTANT: if the aircraft still turns the wrong way,
+      // flip the sign on the next line only.
+      flight.yawVel += -Math.sin(flight.roll) * flight.bankYawFactor * speedAuthority * dt;
+    
+      // Slight natural nose-down tendency when not pulling back.
+      if (Math.abs(flight.pitchInputSmoothed) < 0.001) {
+        flight.pitchVel -= flight.noseDownTrim * dt;
       }
-
-      flight.pitchVel -= flight.pitchVel * flight.pitchDamping * dt;
-      flight.rollVel -= flight.rollVel * flight.rollDamping * dt;
-      flight.yawVel -= flight.yawVel * flight.yawDamping * dt;
-
-      flight.pitch = THREE.MathUtils.clamp(flight.pitch + flight.pitchVel * dt, -0.8, 0.8);
-      flight.roll = THREE.MathUtils.clamp(flight.roll + flight.rollVel * dt, -1.2, 1.2);
+    
+      // Gentle self-leveling in roll to stop endless spiral lock.
+      flight.rollVel += -flight.roll * 0.35 * dt;
+    
+      // Exponential damping keeps motion smooth and stable.
+      flight.pitchVel *= Math.exp(-flight.pitchDamping * dt);
+      flight.rollVel *= Math.exp(-flight.rollDamping * dt);
+      flight.yawVel *= Math.exp(-flight.yawDamping * dt);
+    
+      // Limit angular speed so the jet stays believable.
+      flight.pitchVel = THREE.MathUtils.clamp(flight.pitchVel, -2.8, 2.8);
+      flight.rollVel = THREE.MathUtils.clamp(flight.rollVel, -4.5, 4.5);
+      flight.yawVel = THREE.MathUtils.clamp(flight.yawVel, -1.4, 1.4);
+    
+      // Integrate orientation.
+      flight.pitch = THREE.MathUtils.clamp(flight.pitch + flight.pitchVel * dt, -0.92, 0.92);
+      flight.roll = THREE.MathUtils.clamp(flight.roll + flight.rollVel * dt, -1.25, 1.25);
       flight.yaw += flight.yawVel * dt;
       flight.yaw = ((flight.yaw + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
-
+    
       planeYaw.rotation.y = flight.yaw;
       planeRoll.rotation.x = flight.roll;
       planePitch.rotation.z = flight.pitch;
       planePitch.getWorldQuaternion(planeWorldQuat);
-
+    
+      // Forward direction in world space.
       forwardVec.set(1, 0, 0).applyQuaternion(planeWorldQuat).normalize();
-
-      let thrust = flight.thrust;
-      if (keyState.has('shift')) {
-        thrust *= flight.afterburnerFactor;
-      }
-
+    
+      // Thrust and afterburner.
+      const thrust = flight.thrust * (keyState.has('shift') ? flight.afterburnerFactor : 1);
+    
+      // Parasite drag: base drag that rises with speed^2.
       const parasiteDrag = flight.dragCoeff * flight.speed * flight.speed;
-      const inducedDrag = flight.inducedDrag * flight.speed * flight.speed * Math.abs(flight.roll);
+    
+      // Induced drag: rises when banking or pulling harder.
+      // This is what makes hard turns bleed speed.
+      const bankFactor = 1 / Math.max(0.35, Math.cos(flight.roll));
+      const pullFactor = 1 + Math.max(0, flight.pitchInputSmoothed) * 0.45;
+      const inducedDrag = flight.inducedDragCoeff * flight.speed * flight.speed * (bankFactor - 1) * pullFactor;
+    
       const totalDrag = parasiteDrag + inducedDrag;
       flight.speed += (thrust - totalDrag) * dt;
       flight.speed = THREE.MathUtils.clamp(flight.speed, flight.minSpeed, flight.maxSpeed);
-
-      const lift = flight.liftCoeff * flight.speed * flight.speed * Math.cos(flight.roll);
-      flight.verticalAcceleration = lift - flight.gravity;
-      if (flight.speed < flight.stallSpeed) {
-        flight.verticalAcceleration -= (flight.stallSpeed - flight.speed) * flight.stallSink;
-      }
-
+    
+      // Lift: scales with speed^2.
+      // Banking reduces the vertical component of lift, so the jet sinks unless
+      // speed and attitude are right.
+      const lift = flight.liftCoeff * flight.speed * flight.speed;
+      const bankLift = Math.max(0.18, Math.cos(flight.roll));
+      const pitchLift = 1 + Math.max(-0.2, flight.pitch) * 0.7;
+      const liftAccel = lift * bankLift * pitchLift;
+    
+      const stallSink = flight.speed < flight.stallSpeed
+        ? (flight.stallSpeed - flight.speed) * 1.8
+        : 0;
+    
+      const bankSink = Math.abs(flight.roll) * flight.speed * 0.015;
+    
+      flight.verticalAcceleration = liftAccel - flight.gravity - stallSink - bankSink;
       flight.verticalSpeed += flight.verticalAcceleration * dt;
-      flight.verticalSpeed = THREE.MathUtils.clamp(flight.verticalSpeed, -40, 40);
-
+      flight.verticalSpeed *= Math.exp(-1.15 * dt);
+      flight.verticalSpeed = THREE.MathUtils.clamp(flight.verticalSpeed, -60, 50);
+    
       desiredVelocity.copy(forwardVec).multiplyScalar(flight.speed);
       desiredVelocity.y = flight.verticalSpeed;
       flight.velocity.copy(desiredVelocity);
+    
       planeWorld.addScaledVector(flight.velocity, dt);
-
+    
       const groundY = terrainHeightAt(planeWorld.x, planeWorld.z);
       const floorHeight = groundY + 5;
       if (planeWorld.y < floorHeight) {
         planeWorld.y = floorHeight;
         flight.verticalSpeed = 0;
-        flight.pitch *= 0.9;
-        flight.pitchVel *= 0.5;
+        flight.pitch *= 0.92;
+        flight.pitchVel *= 0.55;
       }
-
+    
       updateRenderOrigin();
       syncRenderedWorld();
       updateChunks(planeWorld.x, planeWorld.z);
-
+    
       markerRefreshTimer += dt;
       if (markerRefreshTimer >= 0.08) {
         markerRefreshTimer = 0;
@@ -551,7 +622,7 @@
         }
         markerMesh.instanceMatrix.needsUpdate = true;
       }
-
+    
       speedEl.textContent = flight.speed.toFixed(0);
       altitudeEl.textContent = Math.max(0, planeWorld.y - groundY).toFixed(0);
     }
