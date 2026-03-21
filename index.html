@@ -172,11 +172,12 @@
     }
 
     const CHUNK_SIZE = 400;
-    const CHUNK_SEGMENTS = 80;
+    const CHUNK_SEGMENTS = 48;
     const CHUNK_WORLD_SIZE = CHUNK_SIZE;
     const RENDER_DISTANCE = 3;
 
     const chunks = new Map();
+    const chunkPool = [];
     const renderOrigin = new THREE.Vector3();
     const floatingOriginThreshold = CHUNK_SIZE * 0.5;
 
@@ -224,10 +225,21 @@
         })
       );
       mesh.receiveShadow = true;
-
-      updateChunkGeometry(mesh, cx, cz);
-      scene.add(mesh);
       return { mesh, cx, cz };
+    }
+
+    function acquireChunk(cx, cz) {
+      const chunk = chunkPool.pop() ?? createChunk(cx, cz);
+      chunk.cx = cx;
+      chunk.cz = cz;
+      updateChunkGeometry(chunk.mesh, cx, cz);
+      scene.add(chunk.mesh);
+      return chunk;
+    }
+
+    function releaseChunk(chunk) {
+      scene.remove(chunk.mesh);
+      chunkPool.push(chunk);
     }
 
     function syncChunkRenderPositions() {
@@ -252,51 +264,70 @@
           const key = chunkKey(cx, cz);
           needed.add(key);
           if (!chunks.has(key)) {
-            chunks.set(key, createChunk(cx, cz));
+            chunks.set(key, acquireChunk(cx, cz));
           }
         }
       }
 
       for (const [key, chunk] of chunks) {
         if (!needed.has(key)) {
-          scene.remove(chunk.mesh);
-          chunk.mesh.geometry.dispose();
-          chunk.mesh.material.dispose();
+          releaseChunk(chunk);
           chunks.delete(key);
         }
       }
     }
 
-    const markerGroup = new THREE.Group();
-    scene.add(markerGroup);
+    const markerCount = 420;
     const markerGeo = new THREE.ConeGeometry(2.2, 10, 6);
     const markerMat = new THREE.MeshStandardMaterial({ color: 0x2f7f34, roughness: 0.9 });
+    const markerMesh = new THREE.InstancedMesh(markerGeo, markerMat, markerCount);
+    markerMesh.castShadow = false;
+    markerMesh.receiveShadow = false;
+    markerMesh.frustumCulled = false;
+    markerMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    scene.add(markerMesh);
 
-    function placeMarker(tree, x, z) {
-      const terrainY = terrainHeightAt(x, z);
-      tree.userData.worldX = x;
-      tree.userData.worldZ = z;
-      tree.position.set(x - renderOrigin.x, terrainY + 5, z - renderOrigin.z);
+    const markerData = Array.from({ length: markerCount }, () => ({
+      x: (Math.random() - 0.5) * 3000,
+      y: 0,
+      z: (Math.random() - 0.5) * 3000,
+      rotationY: Math.random() * Math.PI * 2
+    }));
+    const markerDummy = new THREE.Object3D();
+
+    function updateMarkerMatrix(index) {
+      const marker = markerData[index];
+      markerDummy.position.set(marker.x - renderOrigin.x, marker.y, marker.z - renderOrigin.z);
+      markerDummy.rotation.set(0, marker.rotationY, 0);
+      markerDummy.scale.setScalar(1);
+      markerDummy.updateMatrix();
+      markerMesh.setMatrixAt(index, markerDummy.matrix);
+    }
+
+    function setMarkerInstance(index, x, z, rotationY = Math.random() * Math.PI * 2) {
+      const marker = markerData[index];
+      marker.x = x;
+      marker.y = terrainHeightAt(x, z) + 5;
+      marker.z = z;
+      marker.rotationY = rotationY;
+      updateMarkerMatrix(index);
     }
 
     function syncMarkerRenderPositions() {
-      markerGroup.children.forEach((tree) => {
-        tree.position.x = tree.userData.worldX - renderOrigin.x;
-        tree.position.z = tree.userData.worldZ - renderOrigin.z;
-      });
+      for (let i = 0; i < markerCount; i += 1) {
+        updateMarkerMatrix(i);
+      }
+      markerMesh.instanceMatrix.needsUpdate = true;
     }
 
     const markerResetDistance = CHUNK_WORLD_SIZE * (RENDER_DISTANCE + 1.75);
     const markerResetDistanceSq = markerResetDistance * markerResetDistance;
 
-    for (let i = 0; i < 420; i += 1) {
-      const tree = new THREE.Mesh(markerGeo, markerMat);
-      const x = (Math.random() - 0.5) * 3000;
-      const z = (Math.random() - 0.5) * 3000;
-      placeMarker(tree, x, z);
-      tree.castShadow = true;
-      markerGroup.add(tree);
+    for (let i = 0; i < markerCount; i += 1) {
+      const marker = markerData[i];
+      setMarkerInstance(i, marker.x, marker.z, marker.rotationY);
     }
+    markerMesh.instanceMatrix.needsUpdate = true;
 
     const planeYaw = new THREE.Group();
     const planeRoll = new THREE.Group();
@@ -492,7 +523,8 @@
       flight.velocity.copy(desiredVelocity);
       planeWorld.addScaledVector(flight.velocity, dt);
 
-      const floorHeight = terrainHeightAt(planeWorld.x, planeWorld.z) + 4;
+      const groundY = terrainHeightAt(planeWorld.x, planeWorld.z);
+      const floorHeight = groundY + 4;
       if (planeWorld.y < floorHeight) {
         planeWorld.y = floorHeight;
         flight.verticalSpeed = 0;
@@ -507,19 +539,21 @@
       markerRefreshTimer += dt;
       if (markerRefreshTimer >= 0.08) {
         markerRefreshTimer = 0;
-        markerGroup.children.forEach((tree) => {
-          const dx = tree.userData.worldX - planeWorld.x;
-          const dz = tree.userData.worldZ - planeWorld.z;
+        for (let i = 0; i < markerCount; i += 1) {
+          const marker = markerData[i];
+          const dx = marker.x - planeWorld.x;
+          const dz = marker.z - planeWorld.z;
           if (dx * dx + dz * dz > markerResetDistanceSq) {
             const x = planeWorld.x + (Math.random() - 0.5) * 1700;
             const z = planeWorld.z + (Math.random() - 0.5) * 1700;
-            placeMarker(tree, x, z);
+            setMarkerInstance(i, x, z);
           }
-        });
+        }
+        markerMesh.instanceMatrix.needsUpdate = true;
       }
 
       speedEl.textContent = flight.speed.toFixed(0);
-      altitudeEl.textContent = Math.max(0, planeWorld.y - terrainHeightAt(planeWorld.x, planeWorld.z)).toFixed(0);
+      altitudeEl.textContent = Math.max(0, planeWorld.y - groundY).toFixed(0);
     }
 
     function updateCamera(dt) {
