@@ -534,8 +534,8 @@
       flight.rollVel -= flight.rollVel * flight.rollDamping * dt;
       flight.yawVel -= flight.yawVel * flight.yawDamping * dt;
 
-      flight.pitch = THREE.MathUtils.clamp(flight.pitch + flight.pitchVel * dt, -1.2, 1.2);
-      flight.roll = THREE.MathUtils.clamp(flight.roll + flight.rollVel * dt, -1.2, 1.2);
+      flight.pitch = THREE.MathUtils.clamp(flight.pitch + flight.pitchVel * dt, -10, 10);
+      flight.roll = THREE.MathUtils.clamp(flight.roll + flight.rollVel * dt, -10, 10);
       flight.yaw += flight.yawVel * dt;
       flight.yaw = ((flight.yaw + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
 
