@@ -1,4 +1,4 @@
-import * as THREE from 'https://unpkg.com/three@0.161.0/build/three.module.js';
+import * as THREE from 'three';
 import { createFlightSimulator, createFlightState } from './flight.js';
 import { createMarkerSystem } from './markers.js';
 import { createPlaneRig } from './plane.js';

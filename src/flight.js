@@ -1,4 +1,4 @@
-import * as THREE from 'https://unpkg.com/three@0.161.0/build/three.module.js';
+import * as THREE from 'three';
 import { terrainHeightAt } from './terrain.js';
 
 export function createFlightState() {
