@@ -1,19 +1,20 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
+// Fallback plane in case GLB fails
 function createFallbackPlane() {
   const fallbackPlane = new THREE.Group();
 
   const body = new THREE.Mesh(
     new THREE.CapsuleGeometry(0.45, 2.4, 6, 12),
-    new THREE.MeshStandardMaterial({ color: 0xd8dde6, metalness: 0.45, roughness: 0.4 })
+    new THREE.MeshStandardMaterial({ color: 0xd8dde6, metalness: 0.45, roughness: 0.4, side: THREE.DoubleSide })
   );
   body.rotation.z = Math.PI / 2;
   fallbackPlane.add(body);
 
   const wing = new THREE.Mesh(
     new THREE.BoxGeometry(0.2, 0.08, 2.8),
-    new THREE.MeshStandardMaterial({ color: 0x3f566e, metalness: 0.25, roughness: 0.55 })
+    new THREE.MeshStandardMaterial({ color: 0x3f566e, metalness: 0.25, roughness: 0.55, side: THREE.DoubleSide })
   );
   fallbackPlane.add(wing);
 
@@ -24,14 +25,14 @@ function createFallbackPlane() {
 
   const fin = new THREE.Mesh(
     new THREE.BoxGeometry(0.55, 0.75, 0.08),
-    new THREE.MeshStandardMaterial({ color: 0x4d6d8a, metalness: 0.2, roughness: 0.5 })
+    new THREE.MeshStandardMaterial({ color: 0x4d6d8a, metalness: 0.2, roughness: 0.5, side: THREE.DoubleSide })
   );
   fin.position.set(-1.2, 0.55, 0);
   fallbackPlane.add(fin);
 
   const nose = new THREE.Mesh(
     new THREE.ConeGeometry(0.34, 0.9, 14),
-    new THREE.MeshStandardMaterial({ color: 0xf06a4a, metalness: 0.15, roughness: 0.45 })
+    new THREE.MeshStandardMaterial({ color: 0xf06a4a, metalness: 0.15, roughness: 0.45, side: THREE.DoubleSide })
   );
   nose.rotation.z = -Math.PI / 2;
   nose.position.set(1.62, 0, 0);
@@ -47,6 +48,7 @@ function createFallbackPlane() {
   return fallbackPlane;
 }
 
+// Normalize plane size and position
 function normalizePlaneModel(planeModel) {
   const targetLength = 10;
   const bounds = new THREE.Box3().setFromObject(planeModel);
@@ -78,6 +80,7 @@ function normalizePlaneModel(planeModel) {
   });
 }
 
+// Main plane rig
 export function createPlaneRig(scene) {
   const planeYaw = new THREE.Group();
   const planeRoll = new THREE.Group();
@@ -98,38 +101,38 @@ export function createPlaneRig(scene) {
       planeModel.rotation.y = Math.PI / 2;
 
       planeModel.traverse((child) => {
-        if (child.isMesh) {
-          child.castShadow = true;
-          child.receiveShadow = true;
-      
-          if (child.geometry) {
-            child.geometry.computeVertexNormals();
+        if (!child.isMesh) return;
+
+        child.castShadow = true;
+        child.receiveShadow = true;
+
+        if (child.geometry) {
+          child.geometry.computeVertexNormals();
+        }
+
+        const materials = Array.isArray(child.material) ? child.material : [child.material];
+
+        for (const mat of materials) {
+          mat.side = THREE.DoubleSide;
+
+          // Handle opaque vs transparent properly
+          if (mat.transparent) {
+            mat.depthWrite = false;
+            mat.alphaToCoverage = true;
+          } else {
+            mat.depthWrite = true;
           }
-      
-          if (child.material) {
-            // Keep DoubleSide
-            child.material.side = THREE.DoubleSide;
-      
-            // Fix depth and z-fighting
-            child.material.depthWrite = true;
-            child.material.depthTest = true;
-            child.material.polygonOffset = true;
-            child.material.polygonOffsetFactor = 1;
-            child.material.polygonOffsetUnits = 1;
-      
-            // Fix texture color / sharpness
-            if (child.material.map) {
-              child.material.map.colorSpace = THREE.SRGBColorSpace;
-              child.material.map.anisotropy = 8;
-            }
-      
-            // Optional: for glass/transparency parts
-            if (child.material.transparent) {
-              child.material.alphaToCoverage = true; // helps with sorting
-            }
+          mat.depthTest = true;
+
+          if (mat.map) {
+            mat.map.colorSpace = THREE.SRGBColorSpace;
+            mat.map.anisotropy = 8;
           }
+
+          mat.needsUpdate = true;
         }
       });
+
       normalizePlaneModel(planeModel);
       planePitch.add(planeModel);
       console.info('Plane model loaded:', planeAssetUrl);
