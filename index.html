@@ -438,12 +438,12 @@
     plane.add(canopyBase);
 
     const wingShape = new THREE.Shape();
-    wingShape.moveTo(-2.8, 0.0);
-    wingShape.lineTo(-0.9, 0.56);
-    wingShape.lineTo(2.55, 2.45);
-    wingShape.lineTo(1.08, 0.08);
-    wingShape.lineTo(-1.32, -0.12);
-    wingShape.lineTo(-2.8, 0.0);
+    wingShape.moveTo(2.8, 0.0);
+    wingShape.lineTo(1.32, -0.12);
+    wingShape.lineTo(-1.08, 0.08);
+    wingShape.lineTo(-2.55, 2.45);
+    wingShape.lineTo(0.9, 0.56);
+    wingShape.lineTo(2.8, 0.0);
 
     const wingGeometry = new THREE.ExtrudeGeometry(wingShape, {
       depth: 0.14,
