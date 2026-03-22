@@ -95,7 +95,7 @@ export function createPlaneRig(scene) {
     planeAssetUrl,
     (gltf) => {
       planeModel = gltf.scene;
-      planeModel.rotation.y = Math.PI;
+      planeModel.rotation.y = Math.PI / 2;
 
       planeModel.traverse((child) => {
         if (child.isMesh) {
