@@ -591,24 +591,23 @@
       pitchDamping: 3.0,
       rollDamping: 3.0,
       yawDamping: 2.0,
-      liftCoeff: 0.0010,
-      dragCoeff: 0.002,
-      inducedDrag: 0.0001,
-      thrust: 80,
+      liftCoeff: 0.0065,
+      dragCoeff: 0.0035,
+      inducedDrag: 0.0012,
+      thrust: 18,
       throttle: 0.72,
       throttleAdjustRate: 0.55,
-      afterburnerFactor: 1.8,
+      afterburnerFactor: 1.65,
       gravity: 9.8,
       stallSink: 5.0,
       aoa: 0,
-      aoaLiftFactor: 1.6,
+      aoaLiftFactor: 2.2,
       aoaDragFactor: 0.65,
       criticalAoa: 0.22,
       maxAoa: 0.48,
       turnDragCoeff: 0.00018,
       liftYawFactor: 0.55,
-      verticalSpeed: 0,
-      verticalAcceleration: 0
+      baseLiftCoeff: 0.5
     };
 
     const keyState = new Set();
@@ -630,8 +629,14 @@
     let accumulator = 0;
     let markerRefreshTimer = 0;
     const forwardVec = new THREE.Vector3();
+    const upVec = new THREE.Vector3();
     const velocityDirVec = new THREE.Vector3();
-    const desiredVelocity = new THREE.Vector3();
+    const thrustForceVec = new THREE.Vector3();
+    const dragForceVec = new THREE.Vector3();
+    const liftForceVec = new THREE.Vector3();
+    const gravityForceVec = new THREE.Vector3(0, -1, 0);
+    const accelVec = new THREE.Vector3();
+    const liftDirVec = new THREE.Vector3();
     const planeWorldQuat = new THREE.Quaternion();
     const chaseOffsetVec = new THREE.Vector3();
     const targetPosVec = new THREE.Vector3();
@@ -715,12 +720,14 @@
       planePitch.getWorldQuaternion(planeWorldQuat);
 
       forwardVec.set(1, 0, 0).applyQuaternion(planeWorldQuat).normalize();
+      const airSpeed = flight.velocity.length();
       velocityDirVec.copy(flight.velocity);
-      if (velocityDirVec.lengthSq() > 1e-6) {
-        velocityDirVec.normalize();
+      if (airSpeed > 1e-6) {
+        velocityDirVec.multiplyScalar(1 / airSpeed);
       } else {
         velocityDirVec.copy(forwardVec);
       }
+      upVec.set(0, 1, 0).applyQuaternion(planeWorldQuat).normalize();
 
       // Angle of attack: compare nose direction to flight-path direction.
       const forwardPitch = Math.atan2(forwardVec.y, Math.hypot(forwardVec.x, forwardVec.z));
@@ -739,61 +746,56 @@
         thrust *= flight.afterburnerFactor;
       }
 
-      // AoA and turn/G loading both add induced drag, so hard pulls bleed speed.
+      // Force-based flight model: thrust pushes forward, drag opposes airflow, and banked lift bends the path.
       const loadFactor = 1 / Math.max(0.35, Math.abs(Math.cos(flight.roll)));
-      const parasiteDrag = flight.dragCoeff * flight.speed * flight.speed;
-      const inducedDrag = flight.inducedDrag * flight.speed * flight.speed * (
-        Math.abs(flight.roll) + Math.abs(flight.aoa) * flight.aoaDragFactor
+      const parasiteDrag = flight.dragCoeff * airSpeed * airSpeed;
+      const inducedDrag = flight.inducedDrag * airSpeed * airSpeed * (
+        Math.abs(flight.aoa) * flight.aoaDragFactor + (loadFactor - 1) * 0.85
       );
-      const turnDrag = flight.turnDragCoeff * loadFactor * Math.abs(flight.pitchInputSmoothed) * flight.speed * flight.speed;
+      const turnDrag = flight.turnDragCoeff * airSpeed * airSpeed * Math.abs(flight.rollInputSmoothed);
       const totalDrag = parasiteDrag + inducedDrag + turnDrag;
-      flight.speed += (thrust - totalDrag) * dt;
-      flight.speed = THREE.MathUtils.clamp(flight.speed, flight.minSpeed, flight.maxSpeed);
 
-      // Lift vector tilt: banking redirects lift sideways, which drives turning.
-      const liftBase = flight.liftCoeff * flight.speed * flight.speed;
-      const baseLift = 0.3;
-      const aoaForLift = flight.aoa >= 0 ? effectiveAoa : flight.aoa * 0.7;
-      const liftFromAoa = aoaForLift * flight.aoaLiftFactor;
-      const liftCoefficient = THREE.MathUtils.clamp(
-        baseLift + liftFromAoa,
-        -0.4,
-        1.2
+      thrustForceVec.copy(forwardVec).multiplyScalar(thrust);
+      dragForceVec.copy(velocityDirVec).multiplyScalar(-totalDrag);
+
+      liftDirVec.copy(upVec).sub(
+        velocityDirVec.clone().multiplyScalar(upVec.dot(velocityDirVec))
       );
-      const liftForce = liftBase * liftCoefficient;
-      const verticalLift = liftForce * Math.cos(flight.roll);
-      const sidewaysForce = -liftForce * Math.sin(flight.roll);
-
-      const bankRecoveryFactor = (
-        Math.abs(flight.rollInputSmoothed) > 0.05 &&
-        Math.sign(flight.rollInputSmoothed) !== Math.sign(flight.roll)
-      ) ? 0.45 : 1;
-      const turnAuthority = (1 - stallProgress * 0.55) * bankRecoveryFactor;
-      flight.yawVel += (
-        sidewaysForce * flight.liftYawFactor * turnAuthority / Math.max(flight.speed, 1)
-      ) * dt;
-
-      flight.verticalAcceleration = verticalLift - flight.gravity;
-      if (flight.speed < flight.stallSpeed) {
-        flight.verticalAcceleration -= (flight.stallSpeed - flight.speed) * flight.stallSink;
-      }
-      if (stallProgress > 0) {
-        flight.verticalAcceleration -= stallProgress * 6;
+      if (liftDirVec.lengthSq() < 1e-6) {
+        liftDirVec.set(0, 1, 0);
+      } else {
+        liftDirVec.normalize();
       }
 
-      flight.verticalSpeed += flight.verticalAcceleration * dt;
-      flight.verticalSpeed = THREE.MathUtils.clamp(flight.verticalSpeed, -40, 40);
+      const aoaForLift = flight.aoa >= 0 ? effectiveAoa : flight.aoa * 0.7;
+      let liftCoefficient = flight.baseLiftCoeff + aoaForLift * flight.aoaLiftFactor;
+      liftCoefficient *= 1 - stallProgress * 0.65;
+      liftCoefficient = THREE.MathUtils.clamp(liftCoefficient, -0.2, 1.2);
 
-      desiredVelocity.copy(forwardVec).multiplyScalar(flight.speed);
-      desiredVelocity.y = flight.verticalSpeed;
-      flight.velocity.copy(desiredVelocity);
+      const liftMagnitude = flight.liftCoeff * airSpeed * airSpeed * liftCoefficient;
+      liftForceVec.copy(liftDirVec).multiplyScalar(liftMagnitude);
+
+      accelVec
+        .copy(thrustForceVec)
+        .add(dragForceVec)
+        .add(liftForceVec)
+        .addScaledVector(gravityForceVec, flight.gravity);
+
+      flight.velocity.addScaledVector(accelVec, dt);
+      flight.speed = flight.velocity.length();
+      if (flight.speed > flight.maxSpeed) {
+        flight.velocity.multiplyScalar(flight.maxSpeed / flight.speed);
+        flight.speed = flight.maxSpeed;
+      }
       planeWorld.addScaledVector(flight.velocity, dt);
 
       const groundY = terrainHeightAt(planeWorld.x, planeWorld.z);
       const floorHeight = groundY + 5;
       if (planeWorld.y < floorHeight) {
         planeWorld.y = floorHeight;
-        flight.verticalSpeed = 0;
+        if (flight.velocity.y < 0) {
+          flight.velocity.y = 0;
+        }
         flight.pitch *= 0.9;
         flight.pitchVel *= 0.5;
       }
@@ -818,6 +820,7 @@
         markerMesh.instanceMatrix.needsUpdate = true;
       }
 
+      flight.speed = flight.velocity.length();
       speedEl.textContent = flight.speed.toFixed(0);
       altitudeEl.textContent = Math.max(0, planeWorld.y - groundY).toFixed(0);
       const throttlePercent = Math.round(flight.throttle * 100);
