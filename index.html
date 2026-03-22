@@ -696,6 +696,10 @@
       flight.rollVel += rollError * flight.rollAuthority * controlScale * dt;
       flight.yawVel += flight.yawInputSmoothed * flight.yawRate * dt;
 
+      // Banked turning effect
+      const bankTurnStrength = 1.8; // tune
+      flight.yawVel += Math.sin(flight.roll) * bankTurnStrength * dt;
+
       if (Math.abs(flight.pitchInputSmoothed) < 1e-3) {
         flight.pitchVel -= 0.15 * dt;
       }
@@ -721,12 +725,14 @@
 
       forwardVec.set(1, 0, 0).applyQuaternion(planeWorldQuat).normalize();
       const airSpeed = flight.velocity.length();
-      velocityDirVec.copy(flight.velocity);
-      if (airSpeed > 1e-6) {
-        velocityDirVec.multiplyScalar(1 / airSpeed);
-      } else {
-        velocityDirVec.copy(forwardVec);
-      }
+      // --- LATERAL DAMPING (prevents sliding) ---
+      const rightVec = new THREE.Vector3(0, 0, 1).applyQuaternion(planeWorldQuat).normalize();
+      const sideSpeed = flight.velocity.dot(rightVec);
+      
+      // Tune this (2–4 is good)
+      const sideDamping = 2.5;
+      
+      flight.velocity.addScaledVector(rightVec, -sideSpeed * sideDamping * dt);
       upVec.set(0, 1, 0).applyQuaternion(planeWorldQuat).normalize();
 
       // Angle of attack: compare nose direction to flight-path direction.
@@ -758,14 +764,16 @@
       thrustForceVec.copy(forwardVec).multiplyScalar(thrust);
       dragForceVec.copy(velocityDirVec).multiplyScalar(-totalDrag);
 
-      liftDirVec.copy(upVec).sub(
+      // Lift mostly follows wing orientation, not just airflow
+      liftDirVec.copy(upVec);
+      
+      // Blend toward perpendicular-to-velocity for stability
+      const perpLift = upVec.clone().sub(
         velocityDirVec.clone().multiplyScalar(upVec.dot(velocityDirVec))
-      );
-      if (liftDirVec.lengthSq() < 1e-6) {
-        liftDirVec.set(0, 1, 0);
-      } else {
-        liftDirVec.normalize();
-      }
+      ).normalize();
+      
+      // Blend factor (tune 0.2–0.5)
+      liftDirVec.lerp(perpLift, 0.35).normalize();
 
       const aoaForLift = flight.aoa >= 0 ? effectiveAoa : flight.aoa * 0.7;
       let liftCoefficient = flight.baseLiftCoeff + aoaForLift * flight.aoaLiftFactor;
@@ -781,8 +789,16 @@
         .add(liftForceVec)
         .addScaledVector(gravityForceVec, flight.gravity);
 
-      flight.velocity.addScaledVector(accelVec, dt);
-      flight.speed = flight.velocity.length();
+      // --- VELOCITY ALIGNMENT (stabilizes turns) ---
+      const alignStrength = 0.6; // tune 0.3–1.0
+      
+      const desiredDir = forwardVec.clone();
+      const currentSpeed = flight.velocity.length();
+      
+      const alignedVel = desiredDir.multiplyScalar(currentSpeed);
+      
+      // Smoothly align velocity with where the plane is pointing
+      flight.velocity.lerp(alignedVel, alignStrength * dt);
       if (flight.speed > flight.maxSpeed) {
         flight.velocity.multiplyScalar(flight.maxSpeed / flight.speed);
         flight.speed = flight.maxSpeed;
