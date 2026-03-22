@@ -102,9 +102,24 @@ export function createPlaneRig(scene) {
           child.castShadow = true;
           child.receiveShadow = true;
       
-          // 🔥 Fix invisible faces (backface culling)
+          if (child.geometry) {
+            child.geometry.computeVertexNormals();
+          }
+      
           if (child.material) {
-            child.material.side = THREE.DoubleSide;
+            // ✅ Use correct side rendering
+            child.material.side = THREE.FrontSide;
+      
+            // ✅ Fix color/texture rendering
+            if (child.material.map) {
+              child.material.map.colorSpace = THREE.SRGBColorSpace;
+              child.material.map.anisotropy = 8;
+            }
+      
+            // ✅ Prevent flickering / z-fighting
+            child.material.polygonOffset = true;
+            child.material.polygonOffsetFactor = 1;
+            child.material.polygonOffsetUnits = 1;
           }
         }
       });
