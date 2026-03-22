@@ -89,7 +89,7 @@ export function createPlaneRig(scene) {
   let planeModel = null;
 
   const loader = new GLTFLoader();
-  const planeAssetUrl = new URL('./Models/jet.glb', import.meta.url).href;
+  const planeAssetUrl = new URL('./Models/jet2.glb', import.meta.url).href;
 
   loader.load(
     planeAssetUrl,
