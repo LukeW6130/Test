@@ -88,12 +88,12 @@ export function createPlaneRig(scene) {
   wingGeometry.translate(0, 0.02, -0.07);
 
   const leftWing = new THREE.Mesh(wingGeometry, fighterBodyMat);
-  leftWing.position.set(0.18, -0.04, 0.86);
+  leftWing.position.set(0.18, -0.04, 0.76);
   leftWing.castShadow = true;
   plane.add(leftWing);
 
   const rightWing = new THREE.Mesh(wingGeometry, fighterBodyMat);
-  rightWing.position.set(0.18, -0.04, -0.86);
+  rightWing.position.set(0.18, -0.04, -0.76);
   rightWing.scale.z = -1;
   rightWing.castShadow = true;
   plane.add(rightWing);
