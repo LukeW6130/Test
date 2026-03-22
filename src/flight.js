@@ -228,22 +228,19 @@ export function createFlightSimulator({
 
     const liftMag = flight.liftCoeff * airSpeed * airSpeed * liftCoeff;
 
-    // Lift direction (REAL FIX)
+    // ✅ FIXED LIFT (no sideways bias)
     const liftDir = tempVec
-      .copy(velocityDir)
-      .cross(right)
-      .cross(velocityDir)
+      .copy(up)
+      .projectOnPlane(velocityDir)
       .normalize();
-
-    liftDir.lerp(up, 0.2).normalize();
 
     liftForce.copy(liftDir).multiplyScalar(liftMag);
 
-    // Extra G pull in turns
+    // Optional: extra lift in turns
     const gPull = Math.abs(Math.sin(flight.roll)) * 0.6;
     liftForce.addScaledVector(up, liftMag * gPull);
 
-    // Induced + turn drag
+    // Drag
     const inducedDrag = flight.inducedDrag * (liftMag * liftMag) / Math.max(airSpeed * airSpeed, 1);
 
     const loadFactor = 1 / Math.max(0.4, Math.abs(Math.cos(flight.roll)));
@@ -260,7 +257,11 @@ export function createFlightSimulator({
 
     flight.velocity.addScaledVector(accel, dt);
 
-    // Subtle aerodynamic alignment (NOT snapping)
+    // Mild sideslip damping (prevents drift without killing realism)
+    const sideSpeed = flight.velocity.dot(right);
+    flight.velocity.addScaledVector(right, -sideSpeed * 1.2 * dt);
+
+    // Subtle alignment (keeps control smooth)
     const desiredVel = forward.clone().multiplyScalar(flight.velocity.length());
     flight.velocity.lerp(desiredVel, 0.15 * dt);
 
