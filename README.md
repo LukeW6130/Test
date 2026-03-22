@@ -2,6 +2,19 @@
 
 A tiny browser game where you fly a stylized 3D plane over unique procedural terrain.
 
+## Project structure
+
+The game is now split into smaller files so each part of the app is easier to understand and update:
+
+- `index.html` wires up the HUD and loads the app entry point.
+- `styles.css` contains the page and HUD styling.
+- `src/main.js` boots the game loop and coordinates the subsystems.
+- `src/scene.js` creates the Three.js renderer, lights, and sky.
+- `src/terrain.js` handles procedural terrain generation and chunk streaming.
+- `src/markers.js` manages the instanced scenery markers.
+- `src/plane.js` builds the aircraft model.
+- `src/flight.js` contains the flight-state data and simulation logic.
+
 ## I don't have the repo yet — how do I run it?
 
 1. Install **Git** and **Python 3**.
