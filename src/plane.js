@@ -102,29 +102,34 @@ export function createPlaneRig(scene) {
           child.castShadow = true;
           child.receiveShadow = true;
       
-          if (child.material) {
-            // Keep the base color and textures
-            const map = child.material.map || null;
-            const normalMap = child.material.normalMap || null;
-      
-            child.material = new THREE.MeshPhysicalMaterial({
-              map: map,
-              normalMap: normalMap,
-              metalness: child.material.metalness ?? 0.5,
-              roughness: child.material.roughness ?? 0.4,
-              clearcoat: 1,
-              clearcoatRoughness: 0.05,
-              transmission: child.material.transmission ?? 0,
-              transparent: child.material.transparent ?? false,
-              opacity: child.material.opacity ?? 1,
-              side: THREE.FrontSide,
-            });
+          if (child.geometry) {
+            child.geometry.computeVertexNormals();
           }
       
-          if (child.geometry) child.geometry.computeVertexNormals();
+          if (child.material) {
+            // Keep DoubleSide
+            child.material.side = THREE.DoubleSide;
+      
+            // Fix depth and z-fighting
+            child.material.depthWrite = true;
+            child.material.depthTest = true;
+            child.material.polygonOffset = true;
+            child.material.polygonOffsetFactor = 1;
+            child.material.polygonOffsetUnits = 1;
+      
+            // Fix texture color / sharpness
+            if (child.material.map) {
+              child.material.map.colorSpace = THREE.SRGBColorSpace;
+              child.material.map.anisotropy = 8;
+            }
+      
+            // Optional: for glass/transparency parts
+            if (child.material.transparent) {
+              child.material.alphaToCoverage = true; // helps with sorting
+            }
+          }
         }
       });
-
       normalizePlaneModel(planeModel);
       planePitch.add(planeModel);
       console.info('Plane model loaded:', planeAssetUrl);
