@@ -48,7 +48,7 @@ function createFallbackPlane() {
 }
 
 function normalizePlaneModel(planeModel) {
-  const targetLength = 5.4;
+  const targetLength = 10;
   const bounds = new THREE.Box3().setFromObject(planeModel);
   const size = bounds.getSize(new THREE.Vector3());
   const longestAxis = Math.max(size.x, size.y, size.z);
