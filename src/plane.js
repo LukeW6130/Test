@@ -1,4 +1,16 @@
 import * as THREE from 'https://unpkg.com/three@0.161.0/build/three.module.js';
+import { GLTFLoader } from 'https://unpkg.com/three@0.161.0/examples/jsm/loaders/GLTFLoader.js';
+
+const loader = new GLTFLoader();
+
+loader.load('models/plane.glb', (gltf) => {
+  const model = gltf.scene;
+
+  model.scale.set(1, 1, 1); // adjust if needed
+  model.position.set(0, 0, 0);
+
+  scene.add(model);
+});
 
 export function createPlaneRig(scene) {
   const planeYaw = new THREE.Group();
