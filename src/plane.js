@@ -2,7 +2,6 @@ import * as THREE from 'https://unpkg.com/three@0.161.0/build/three.module.js';
 import { GLTFLoader } from 'https://unpkg.com/three@0.161.0/examples/jsm/loaders/GLTFLoader.js';
 
 export function createPlaneRig(scene) {
-  // ---------------- Rig Hierarchy ----------------
   const planeYaw = new THREE.Group();
   const planeRoll = new THREE.Group();
   const planePitch = new THREE.Group();
@@ -10,43 +9,39 @@ export function createPlaneRig(scene) {
   planeYaw.add(planeRoll);
   planeRoll.add(planePitch);
 
-  // ---------------- Load Model ----------------
+  let planeModel = null; // ✅ important
+
   const loader = new GLTFLoader();
 
-  loader.load('Models/jet.glb', (gltf) => {
-    const model = gltf.scene;
+  loader.load(
+    'Models/jet.glb',
+    (gltf) => {
+      planeModel = gltf.scene;
 
-    // ---------------- Transform Fixes ----------------
-    // You will likely tweak these 3 lines
-    model.scale.set(1, 1, 1);
-    model.position.set(0, 0, 0);
-    model.rotation.y = Math.PI; // common forward-direction fix
+      planeModel.scale.set(1, 1, 1);
+      planeModel.rotation.y = Math.PI;
 
-    // ---------------- Rendering Improvements ----------------
-    model.traverse((child) => {
-      if (child.isMesh) {
-        child.castShadow = true;
-        child.receiveShadow = true;
-
-        // Improve material realism if needed
-        if (child.material) {
-          child.material.metalness = 0.5;
-          child.material.roughness = 0.4;
+      planeModel.traverse((child) => {
+        if (child.isMesh) {
+          child.castShadow = true;
+          child.receiveShadow = true;
         }
-      }
-    });
+      });
 
-    // ✅ Attach model to flight rig
-    planePitch.add(model);
-  });
+      planePitch.add(planeModel);
+    },
+    undefined,
+    (error) => {
+      console.error('GLB failed to load:', error);
+    }
+  );
 
-  // ---------------- Add to Scene ----------------
   scene.add(planeYaw);
 
-  // ---------------- Return Controls ----------------
   return {
     planeYaw,
     planeRoll,
-    planePitch
+    planePitch,
+    getModel: () => planeModel // ✅ lets you safely access it
   };
 }
