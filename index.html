@@ -698,7 +698,7 @@
 
       // Banked turning effect
       const bankTurnStrength = 1.8; // tune
-      flight.yawVel += Math.sin(flight.roll) * bankTurnStrength * dt;
+      flight.yawVel += -Math.sin(flight.roll) * bankTurnStrength * dt;
 
       if (Math.abs(flight.pitchInputSmoothed) < 1e-3) {
         flight.pitchVel -= 0.15 * dt;
