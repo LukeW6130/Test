@@ -1,5 +1,82 @@
-import * as THREE from 'https://unpkg.com/three@0.161.0/build/three.module.js';
-import { GLTFLoader } from 'https://unpkg.com/three@0.161.0/examples/jsm/loaders/GLTFLoader.js';
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+function createFallbackPlane() {
+  const fallbackPlane = new THREE.Group();
+
+  const body = new THREE.Mesh(
+    new THREE.CapsuleGeometry(0.45, 2.4, 6, 12),
+    new THREE.MeshStandardMaterial({ color: 0xd8dde6, metalness: 0.45, roughness: 0.4 })
+  );
+  body.rotation.z = Math.PI / 2;
+  fallbackPlane.add(body);
+
+  const wing = new THREE.Mesh(
+    new THREE.BoxGeometry(0.2, 0.08, 2.8),
+    new THREE.MeshStandardMaterial({ color: 0x3f566e, metalness: 0.25, roughness: 0.55 })
+  );
+  fallbackPlane.add(wing);
+
+  const tailWing = wing.clone();
+  tailWing.scale.set(0.7, 1, 0.42);
+  tailWing.position.set(-1.2, 0.28, 0);
+  fallbackPlane.add(tailWing);
+
+  const fin = new THREE.Mesh(
+    new THREE.BoxGeometry(0.55, 0.75, 0.08),
+    new THREE.MeshStandardMaterial({ color: 0x4d6d8a, metalness: 0.2, roughness: 0.5 })
+  );
+  fin.position.set(-1.2, 0.55, 0);
+  fallbackPlane.add(fin);
+
+  const nose = new THREE.Mesh(
+    new THREE.ConeGeometry(0.34, 0.9, 14),
+    new THREE.MeshStandardMaterial({ color: 0xf06a4a, metalness: 0.15, roughness: 0.45 })
+  );
+  nose.rotation.z = -Math.PI / 2;
+  nose.position.set(1.62, 0, 0);
+  fallbackPlane.add(nose);
+
+  fallbackPlane.traverse((child) => {
+    if (child.isMesh) {
+      child.castShadow = true;
+      child.receiveShadow = true;
+    }
+  });
+
+  return fallbackPlane;
+}
+
+function normalizePlaneModel(planeModel) {
+  const targetLength = 5.4;
+  const bounds = new THREE.Box3().setFromObject(planeModel);
+  const size = bounds.getSize(new THREE.Vector3());
+  const longestAxis = Math.max(size.x, size.y, size.z);
+
+  if (!Number.isFinite(longestAxis) || longestAxis <= 0) {
+    console.warn('Plane model bounds were invalid; skipping normalization.');
+    return;
+  }
+
+  const uniformScale = targetLength / longestAxis;
+  planeModel.scale.setScalar(uniformScale);
+  planeModel.updateMatrixWorld(true);
+
+  const scaledBounds = new THREE.Box3().setFromObject(planeModel);
+  const center = scaledBounds.getCenter(new THREE.Vector3());
+  const groundedY = scaledBounds.min.y;
+
+  planeModel.position.set(-center.x, -groundedY + 0.35, -center.z);
+  planeModel.updateMatrixWorld(true);
+
+  const normalizedBounds = new THREE.Box3().setFromObject(planeModel);
+  const normalizedSize = normalizedBounds.getSize(new THREE.Vector3());
+  console.info('Plane model normalized:', {
+    uniformScale,
+    size: normalizedSize.toArray(),
+    center: normalizedBounds.getCenter(new THREE.Vector3()).toArray()
+  });
+}
 
 export function createPlaneRig(scene) {
   const planeYaw = new THREE.Group();
@@ -9,16 +86,15 @@ export function createPlaneRig(scene) {
   planeYaw.add(planeRoll);
   planeRoll.add(planePitch);
 
-  let planeModel = null; // ✅ important
+  let planeModel = null;
 
   const loader = new GLTFLoader();
+  const planeAssetUrl = new URL('./Models/jet.glb', import.meta.url).href;
 
   loader.load(
-    './src/Models/jet.glb',
+    planeAssetUrl,
     (gltf) => {
       planeModel = gltf.scene;
-
-      planeModel.scale.set(1, 1, 1);
       planeModel.rotation.y = Math.PI;
 
       planeModel.traverse((child) => {
@@ -28,11 +104,15 @@ export function createPlaneRig(scene) {
         }
       });
 
+      normalizePlaneModel(planeModel);
       planePitch.add(planeModel);
+      console.info('Plane model loaded:', planeAssetUrl);
     },
     undefined,
     (error) => {
-      console.error('GLB failed to load:', error);
+      console.error('GLB failed to load, using fallback plane:', planeAssetUrl, error);
+      planeModel = createFallbackPlane();
+      planePitch.add(planeModel);
     }
   );
 
@@ -42,6 +122,6 @@ export function createPlaneRig(scene) {
     planeYaw,
     planeRoll,
     planePitch,
-    getModel: () => planeModel // ✅ lets you safely access it
+    getModel: () => planeModel
   };
 }
