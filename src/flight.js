@@ -5,46 +5,57 @@ export function createFlightState() {
   return {
     velocity: new THREE.Vector3(55, 0, 0),
     speed: 55,
+
     minSpeed: 25,
     cruiseSpeed: 60,
     maxSpeed: 150,
     stallSpeed: 25,
+
     pitch: 0,
     roll: 0,
     yaw: 0,
+
     pitchVel: 0,
     rollVel: 0,
     yawVel: 0,
+
     pitchInputSmoothed: 0,
     rollInputSmoothed: 0,
     yawInputSmoothed: 0,
-    pitchRate: 3.0,
-    rollRate: 4.0,
-    maxRoll: THREE.MathUtils.degToRad(78),
-    rollAuthority: 9.0,
-    rollReturn: 5.4,
-    rollOppositionDamping: 4.0,
+
+    pitchRate: 2.2,
+    rollRate: 4.5,
     yawRate: 0.8,
-    pitchDamping: 3.0,
+
+    maxRoll: THREE.MathUtils.degToRad(75),
+
+    rollAuthority: 8.5,
+    rollReturn: 4.8,
+    rollOppositionDamping: 3.5,
+
+    pitchDamping: 2.5,
     rollDamping: 3.0,
     yawDamping: 2.0,
-    liftCoeff: 0.0065,
-    dragCoeff: 0.0035,
-    inducedDrag: 0.0012,
-    thrust: 18,
+
+    liftCoeff: 0.006,
+    dragCoeff: 0.003,
+    inducedDrag: 0.0015,
+    turnDragCoeff: 0.00025,
+
+    thrust: 20,
     throttle: 0.72,
     throttleAdjustRate: 0.55,
-    afterburnerFactor: 1.65,
+    afterburnerFactor: 1.7,
+
     gravity: 9.8,
-    stallSink: 5.0,
+
     aoa: 0,
-    aoaLiftFactor: 2.2,
-    aoaDragFactor: 0.65,
+    aoaLiftFactor: 2.0,
+    aoaDragFactor: 0.7,
     criticalAoa: 0.22,
-    maxAoa: 0.48,
-    turnDragCoeff: 0.00018,
-    liftYawFactor: 0.55,
-    baseLiftCoeff: 0.5
+    maxAoa: 0.45,
+
+    baseLiftCoeff: 0.45
   };
 }
 
@@ -63,33 +74,38 @@ export function createFlightSimulator({
   markerSystem,
   hud
 }) {
-  const forwardVec = new THREE.Vector3();
-  const upVec = new THREE.Vector3();
-  const velocityDirVec = new THREE.Vector3(1, 0, 0);
-  const thrustForceVec = new THREE.Vector3();
-  const dragForceVec = new THREE.Vector3();
-  const liftForceVec = new THREE.Vector3();
-  const gravityForceVec = new THREE.Vector3(0, -1, 0);
-  const accelVec = new THREE.Vector3();
-  const liftDirVec = new THREE.Vector3();
-  let markerRefreshTimer = 0;
+  const forward = new THREE.Vector3();
+  const up = new THREE.Vector3();
+  const right = new THREE.Vector3();
+  const velocityDir = new THREE.Vector3();
+
+  const thrustForce = new THREE.Vector3();
+  const dragForce = new THREE.Vector3();
+  const liftForce = new THREE.Vector3();
+  const accel = new THREE.Vector3();
+
+  const gravityVec = new THREE.Vector3(0, -1, 0);
+
+  let markerTimer = 0;
+
+  function expDamp(value, damping, dt) {
+    return value * Math.exp(-damping * dt);
+  }
 
   function updateRenderOrigin() {
-    const shiftX = Math.abs(planeWorld.x - renderOrigin.x) > floatingOriginThreshold
-      ? planeWorld.x - renderOrigin.x
-      : 0;
-    const shiftZ = Math.abs(planeWorld.z - renderOrigin.z) > floatingOriginThreshold
-      ? planeWorld.z - renderOrigin.z
-      : 0;
+    const dx = Math.abs(planeWorld.x - renderOrigin.x) > floatingOriginThreshold
+      ? planeWorld.x - renderOrigin.x : 0;
 
-    if (shiftX === 0 && shiftZ === 0) {
-      return;
-    }
+    const dz = Math.abs(planeWorld.z - renderOrigin.z) > floatingOriginThreshold
+      ? planeWorld.z - renderOrigin.z : 0;
 
-    renderOrigin.x += shiftX;
-    renderOrigin.z += shiftZ;
-    camera.position.x -= shiftX;
-    camera.position.z -= shiftZ;
+    if (!dx && !dz) return;
+
+    renderOrigin.x += dx;
+    renderOrigin.z += dz;
+
+    camera.position.x -= dx;
+    camera.position.z -= dz;
   }
 
   function syncRenderedWorld() {
@@ -98,168 +114,176 @@ export function createFlightSimulator({
       planeWorld.y,
       planeWorld.z - renderOrigin.z
     );
+
     terrainSystem.syncChunkRenderPositions();
     markerSystem.syncMarkerRenderPositions();
   }
 
   function updateFlight(dt) {
+    // Prevent instability on low FPS spikes
+    dt = Math.min(dt, 0.033);
+
     const pitchInput = (keyState.has('w') ? 1 : 0) - (keyState.has('s') ? 1 : 0);
     const rollInput = (keyState.has('d') ? 1 : 0) - (keyState.has('a') ? 1 : 0);
     const yawInput = (keyState.has('q') ? 1 : 0) - (keyState.has('e') ? 1 : 0);
     const throttleInput = (keyState.has('r') ? 1 : 0) - (keyState.has('f') ? 1 : 0);
 
+    // Throttle
     flight.throttle = THREE.MathUtils.clamp(
       flight.throttle + throttleInput * flight.throttleAdjustRate * dt,
-      0,
-      1
+      0, 1
     );
 
-    const inputAlpha = 1 - Math.exp(-16 * dt);
-    flight.pitchInputSmoothed = THREE.MathUtils.lerp(flight.pitchInputSmoothed, pitchInput, inputAlpha);
-    flight.rollInputSmoothed = THREE.MathUtils.lerp(flight.rollInputSmoothed, rollInput, inputAlpha);
-    flight.yawInputSmoothed = THREE.MathUtils.lerp(flight.yawInputSmoothed, yawInput, inputAlpha);
+    // Input smoothing
+    const alpha = 1 - Math.exp(-14 * dt);
+    flight.pitchInputSmoothed = THREE.MathUtils.lerp(flight.pitchInputSmoothed, pitchInput, alpha);
+    flight.rollInputSmoothed  = THREE.MathUtils.lerp(flight.rollInputSmoothed,  rollInput,  alpha);
+    flight.yawInputSmoothed   = THREE.MathUtils.lerp(flight.yawInputSmoothed,   yawInput,   alpha);
 
     const speedFactor = THREE.MathUtils.clamp(flight.speed / flight.maxSpeed, 0, 1);
     const controlScale = Math.max(0.6, 1 - speedFactor * 0.4);
+
+    // Rotational dynamics
     flight.pitchVel += flight.pitchInputSmoothed * flight.pitchRate * controlScale * dt;
+
     const desiredRoll = flight.rollInputSmoothed * flight.maxRoll;
     const rollError = desiredRoll - flight.roll;
-    flight.rollVel += rollError * flight.rollAuthority * controlScale * dt;
+    flight.rollVel += rollError * flight.rollAuthority * dt;
+
     flight.yawVel += flight.yawInputSmoothed * flight.yawRate * dt;
 
-    const bankTurnStrength = 1.8;
-    flight.yawVel += -Math.sin(flight.roll) * bankTurnStrength * dt;
+    // Bank turning
+    flight.yawVel += -Math.sin(flight.roll) * 1.5 * dt;
 
-    if (Math.abs(flight.pitchInputSmoothed) < 1e-3) {
-      flight.pitchVel -= 0.15 * dt;
-    }
-    if (Math.abs(flight.rollInputSmoothed) < 1e-3) {
+    // Stabilization
+    if (Math.abs(flight.rollInputSmoothed) < 0.01) {
       flight.rollVel += -flight.roll * flight.rollReturn * dt;
-    } else if (Math.sign(flight.rollInputSmoothed) !== Math.sign(flight.roll) && Math.abs(flight.roll) > 1e-3) {
-      flight.rollVel += -flight.roll * flight.rollOppositionDamping * Math.abs(flight.rollInputSmoothed) * dt;
     }
 
-    flight.pitchVel -= flight.pitchVel * flight.pitchDamping * dt;
-    flight.rollVel -= flight.rollVel * flight.rollDamping * dt;
-    flight.yawVel -= flight.yawVel * flight.yawDamping * dt;
+    // Exponential damping
+    flight.pitchVel = expDamp(flight.pitchVel, flight.pitchDamping, dt);
+    flight.rollVel  = expDamp(flight.rollVel,  flight.rollDamping,  dt);
+    flight.yawVel   = expDamp(flight.yawVel,   flight.yawDamping,   dt);
 
-    flight.pitch = THREE.MathUtils.clamp(flight.pitch + flight.pitchVel * dt, -10, 10);
-    flight.roll = THREE.MathUtils.clamp(flight.roll + flight.rollVel * dt, -flight.maxRoll, flight.maxRoll);
+    // Apply rotation
+    flight.pitch = THREE.MathUtils.clamp(
+      flight.pitch + flight.pitchVel * dt,
+      THREE.MathUtils.degToRad(-60),
+      THREE.MathUtils.degToRad(60)
+    );
+
+    flight.roll = THREE.MathUtils.clamp(
+      flight.roll + flight.rollVel * dt,
+      -flight.maxRoll,
+      flight.maxRoll
+    );
+
     flight.yaw += flight.yawVel * dt;
-    flight.yaw = ((flight.yaw + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
 
     planeYaw.rotation.y = flight.yaw;
     planeRoll.rotation.x = flight.roll;
     planePitch.rotation.z = flight.pitch;
+
     planePitch.getWorldQuaternion(planeWorldQuat);
 
-    forwardVec.set(1, 0, 0).applyQuaternion(planeWorldQuat).normalize();
+    // Orientation vectors
+    forward.set(1, 0, 0).applyQuaternion(planeWorldQuat).normalize();
+    up.set(0, 1, 0).applyQuaternion(planeWorldQuat).normalize();
+    right.set(0, 0, 1).applyQuaternion(planeWorldQuat).normalize();
+
     const airSpeed = flight.velocity.length();
-    if (airSpeed > 1e-6) {
-      velocityDirVec.copy(flight.velocity).normalize();
-    } else {
-      velocityDirVec.copy(forwardVec);
-    }
+    velocityDir.copy(flight.velocity).normalize();
 
-    const rightVec = new THREE.Vector3(0, 0, 1).applyQuaternion(planeWorldQuat).normalize();
-    const sideSpeed = flight.velocity.dot(rightVec);
-    const sideDamping = 2.5;
-    flight.velocity.addScaledVector(rightVec, -sideSpeed * sideDamping * dt);
-    upVec.set(0, 1, 0).applyQuaternion(planeWorldQuat).normalize();
+    // AOA
+    const forwardPitch = Math.atan2(forward.y, Math.hypot(forward.x, forward.z));
+    const velocityPitch = Math.atan2(velocityDir.y, Math.hypot(velocityDir.x, velocityDir.z));
 
-    const forwardPitch = Math.atan2(forwardVec.y, Math.hypot(forwardVec.x, forwardVec.z));
-    const velocityPitch = Math.atan2(velocityDirVec.y, Math.hypot(velocityDirVec.x, velocityDirVec.z));
-    flight.aoa = THREE.MathUtils.clamp(forwardPitch - velocityPitch, -flight.maxAoa, flight.maxAoa);
-    const positiveAoa = Math.max(0, flight.aoa);
+    flight.aoa = THREE.MathUtils.clamp(
+      forwardPitch - velocityPitch,
+      -flight.maxAoa,
+      flight.maxAoa
+    );
+
     const stallProgress = THREE.MathUtils.clamp(
-      (positiveAoa - flight.criticalAoa) / Math.max(1e-6, flight.maxAoa - flight.criticalAoa),
-      0,
-      1
+      (Math.max(0, flight.aoa) - flight.criticalAoa) /
+      (flight.maxAoa - flight.criticalAoa),
+      0, 1
     );
-    const effectiveAoa = positiveAoa * (1 - 0.65 * stallProgress);
 
+    // Forces
     let thrust = flight.thrust * flight.throttle;
-    if (keyState.has('shift')) {
-      thrust *= flight.afterburnerFactor;
-    }
+    if (keyState.has('shift')) thrust *= flight.afterburnerFactor;
 
-    const loadFactor = 1 / Math.max(0.35, Math.abs(Math.cos(flight.roll)));
     const parasiteDrag = flight.dragCoeff * airSpeed * airSpeed;
-    const inducedDrag = flight.inducedDrag * airSpeed * airSpeed * (
-      Math.abs(flight.aoa) * flight.aoaDragFactor + (loadFactor - 1) * 0.85
-    );
-    const turnDrag = flight.turnDragCoeff * airSpeed * airSpeed * Math.abs(flight.rollInputSmoothed);
+    const inducedDrag = flight.inducedDrag * airSpeed * airSpeed *
+      (Math.abs(flight.aoa) + Math.abs(Math.sin(flight.roll)));
+
+    const turnDrag = flight.turnDragCoeff * airSpeed * airSpeed *
+      Math.abs(Math.sin(flight.roll));
+
     const totalDrag = parasiteDrag + inducedDrag + turnDrag;
 
-    thrustForceVec.copy(forwardVec).multiplyScalar(thrust);
-    dragForceVec.copy(velocityDirVec).multiplyScalar(-totalDrag);
+    thrustForce.copy(forward).multiplyScalar(thrust);
+    dragForce.copy(velocityDir).multiplyScalar(-totalDrag);
 
-    liftDirVec.copy(upVec);
-    const perpLift = upVec.clone().sub(
-      velocityDirVec.clone().multiplyScalar(upVec.dot(velocityDirVec))
-    ).normalize();
-    liftDirVec.lerp(perpLift, 0.35).normalize();
+    let liftCoeff = flight.baseLiftCoeff + flight.aoa * flight.aoaLiftFactor;
+    liftCoeff *= (1 - stallProgress * 0.7);
+    liftCoeff = THREE.MathUtils.clamp(liftCoeff, -0.2, 1.2);
 
-    const aoaForLift = flight.aoa >= 0 ? effectiveAoa : flight.aoa * 0.7;
-    let liftCoefficient = flight.baseLiftCoeff + aoaForLift * flight.aoaLiftFactor;
-    liftCoefficient *= 1 - stallProgress * 0.65;
-    liftCoefficient = THREE.MathUtils.clamp(liftCoefficient, -0.2, 1.2);
+    const liftMag = flight.liftCoeff * airSpeed * airSpeed * liftCoeff;
 
-    const liftMagnitude = flight.liftCoeff * airSpeed * airSpeed * liftCoefficient;
-    liftForceVec.copy(liftDirVec).multiplyScalar(liftMagnitude);
+    liftForce.copy(up).multiplyScalar(liftMag);
 
-    accelVec
-      .copy(thrustForceVec)
-      .add(dragForceVec)
-      .add(liftForceVec)
-      .addScaledVector(gravityForceVec, flight.gravity);
+    accel.copy(thrustForce)
+      .add(dragForce)
+      .add(liftForce)
+      .addScaledVector(gravityVec, flight.gravity);
 
-    flight.velocity.addScaledVector(accelVec, dt);
+    flight.velocity.addScaledVector(accel, dt);
 
-    const alignStrength = 0.6;
-    const desiredDir = forwardVec.clone();
-    const currentSpeed = flight.velocity.length();
-    const alignedVel = desiredDir.multiplyScalar(currentSpeed);
-    flight.velocity.lerp(alignedVel, alignStrength * dt);
-
+    // Speed clamp
     flight.speed = flight.velocity.length();
     if (flight.speed > flight.maxSpeed) {
       flight.velocity.multiplyScalar(flight.maxSpeed / flight.speed);
       flight.speed = flight.maxSpeed;
     }
 
+    // Position
     planeWorld.addScaledVector(flight.velocity, dt);
 
+    // Ground collision
     const groundY = terrainHeightAt(planeWorld.x, planeWorld.z);
-    const floorHeight = groundY + 5;
-    if (planeWorld.y < floorHeight) {
-      planeWorld.y = floorHeight;
-      if (flight.velocity.y < 0) {
-        flight.velocity.y = 0;
-      }
+    const floor = groundY + 5;
+
+    if (planeWorld.y < floor) {
+      planeWorld.y = floor;
+      if (flight.velocity.y < 0) flight.velocity.y = 0;
       flight.pitch *= 0.9;
-      flight.pitchVel *= 0.5;
     }
 
+    // World systems
     updateRenderOrigin();
     syncRenderedWorld();
+
     terrainSystem.updateChunks(planeWorld.x, planeWorld.z);
 
-    markerRefreshTimer += dt;
-    if (markerRefreshTimer >= 0.08) {
-      markerRefreshTimer = 0;
+    markerTimer += dt;
+    if (markerTimer > 0.08) {
+      markerTimer = 0;
       markerSystem.refreshAroundPlayer(planeWorld);
     }
 
+    // HUD
     hud.speedEl.textContent = flight.speed.toFixed(0);
     hud.altitudeEl.textContent = Math.max(0, planeWorld.y - groundY).toFixed(0);
-    const throttlePercent = Math.round(flight.throttle * 100);
-    hud.throttleValueEl.textContent = `${throttlePercent}%`;
-    hud.throttleFillEl.style.width = `${throttlePercent}%`;
+
+    const t = Math.round(flight.throttle * 100);
+    hud.throttleValueEl.textContent = `${t}%`;
+    hud.throttleFillEl.style.width = `${t}%`;
   }
 
   return {
-    syncRenderedWorld,
-    updateFlight
+    updateFlight,
+    syncRenderedWorld
   };
 }
