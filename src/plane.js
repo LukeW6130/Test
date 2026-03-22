@@ -118,13 +118,13 @@ export function createPlaneRig(scene) {
   const finGeometry = new THREE.BoxGeometry(1.0, 1.65, 0.14);
   const leftFin = new THREE.Mesh(finGeometry, fighterBodyMat);
   leftFin.position.set(-3.72, 1.24, 0.58);
-  leftFin.rotation.z = THREE.MathUtils.degToRad(-27);
+  leftFin.rotation.z = THREE.MathUtils.degToRad(27);
   leftFin.castShadow = true;
   plane.add(leftFin);
 
   const rightFin = leftFin.clone();
   rightFin.position.z = -0.58;
-  rightFin.rotation.z = THREE.MathUtils.degToRad(-27);
+  rightFin.rotation.z = THREE.MathUtils.degToRad(27);
   plane.add(rightFin);
 
   const engineGeo = new THREE.BoxGeometry(2.9, 0.64, 0.72);
