@@ -104,7 +104,7 @@ export function createPlaneRig(scene) {
       
           // 🔥 Fix invisible faces (backface culling)
           if (child.material) {
-            child.material.side = THREE.DoubleSide;
+            child.material.side = THREE.FrontSide;
           }
         }
       });
