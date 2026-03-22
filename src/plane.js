@@ -14,7 +14,7 @@ export function createPlaneRig(scene) {
   const loader = new GLTFLoader();
 
   loader.load(
-    'Models/jet.glb',
+    './src/Models/jet.glb',
     (gltf) => {
       planeModel = gltf.scene;
 
