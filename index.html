@@ -444,19 +444,24 @@
     canopyBase.castShadow = true;
     jetGroup.add(canopyBase);
     
-    // 5. WINGS (Using ExtrudeGeometry)
+    // 5. WINGS (Corrected for standard backward sweep)
     const wingShape = new THREE.Shape();
-    wingShape.moveTo(-2.8, 0.0);
-    wingShape.lineTo(-0.9, 0.56);
-    wingShape.lineTo(2.55, 2.45);
-    wingShape.lineTo(1.08, 0.08);
-    wingShape.lineTo(-1.32, -0.12);
+    // Root Leading Edge (Forward on the body)
+    wingShape.moveTo(1.5, 0.0);
+    // Tip Leading Edge (Swept back and outward)
+    wingShape.lineTo(-1.2, 2.6);
+    // Tip Trailing Edge (Slightly further back)
+    wingShape.lineTo(-2.2, 2.6);
+    // Root Trailing Edge (Back near the engines)
     wingShape.lineTo(-2.8, 0.0);
+    // Close the shape back to Root Leading Edge
+    wingShape.lineTo(1.5, 0.0);
     
     const wingGeometry = new THREE.ExtrudeGeometry(wingShape, {
       depth: 0.14,
       bevelEnabled: false
     });
+    // Rotate to lie flat, then center the extrusion depth
     wingGeometry.rotateX(Math.PI / 2);
     wingGeometry.translate(0, 0.02, -0.07);
     
@@ -467,7 +472,7 @@
     
     const rightWing = new THREE.Mesh(wingGeometry, fighterBodyMat);
     rightWing.position.set(0.18, -0.04, -0.86);
-    rightWing.scale.z = -1;
+    rightWing.scale.z = -1; // Mirrors the wing for the right side
     rightWing.castShadow = true;
     jetGroup.add(rightWing);
     
