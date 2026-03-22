@@ -101,6 +101,11 @@ export function createPlaneRig(scene) {
         if (child.isMesh) {
           child.castShadow = true;
           child.receiveShadow = true;
+      
+          // 🔥 Fix invisible faces (backface culling)
+          if (child.material) {
+            child.material.side = THREE.DoubleSide;
+          }
         }
       });
 
