@@ -47,6 +47,37 @@ function createFallbackPlane() {
   return fallbackPlane;
 }
 
+function normalizePlaneModel(planeModel) {
+  const targetLength = 5.4;
+  const bounds = new THREE.Box3().setFromObject(planeModel);
+  const size = bounds.getSize(new THREE.Vector3());
+  const longestAxis = Math.max(size.x, size.y, size.z);
+
+  if (!Number.isFinite(longestAxis) || longestAxis <= 0) {
+    console.warn('Plane model bounds were invalid; skipping normalization.');
+    return;
+  }
+
+  const uniformScale = targetLength / longestAxis;
+  planeModel.scale.setScalar(uniformScale);
+  planeModel.updateMatrixWorld(true);
+
+  const scaledBounds = new THREE.Box3().setFromObject(planeModel);
+  const center = scaledBounds.getCenter(new THREE.Vector3());
+  const groundedY = scaledBounds.min.y;
+
+  planeModel.position.set(-center.x, -groundedY + 0.35, -center.z);
+  planeModel.updateMatrixWorld(true);
+
+  const normalizedBounds = new THREE.Box3().setFromObject(planeModel);
+  const normalizedSize = normalizedBounds.getSize(new THREE.Vector3());
+  console.info('Plane model normalized:', {
+    uniformScale,
+    size: normalizedSize.toArray(),
+    center: normalizedBounds.getCenter(new THREE.Vector3()).toArray()
+  });
+}
+
 export function createPlaneRig(scene) {
   const planeYaw = new THREE.Group();
   const planeRoll = new THREE.Group();
@@ -64,7 +95,6 @@ export function createPlaneRig(scene) {
     planeAssetUrl,
     (gltf) => {
       planeModel = gltf.scene;
-      planeModel.scale.setScalar(1);
       planeModel.rotation.y = Math.PI;
 
       planeModel.traverse((child) => {
@@ -74,6 +104,7 @@ export function createPlaneRig(scene) {
         }
       });
 
+      normalizePlaneModel(planeModel);
       planePitch.add(planeModel);
       console.info('Plane model loaded:', planeAssetUrl);
     },
