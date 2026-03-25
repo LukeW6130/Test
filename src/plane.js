@@ -113,7 +113,7 @@ export function createPlaneRig(scene) {
         const materials = Array.isArray(child.material) ? child.material : [child.material];
 
         for (const mat of materials) {
-          mat.side = THREE.DoubleSide;
+          mat.side = THREE.FrontSide;
 
           // Handle opaque vs transparent properly
           if (mat.transparent) {
